@@ -16,6 +16,7 @@ from .scoring import (
     score_classifications,
     write_score_outputs,
 )
+from .rubin import RubinScoringConfig, score_rubin_file, write_rubin_outputs
 
 
 def _print_json(payload: object) -> None:
@@ -23,14 +24,14 @@ def _print_json(payload: object) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Score Active Asteroids Zooniverse classifications.")
+    parser = argparse.ArgumentParser(description="Score citizen-science Zooniverse classifications.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    score = subparsers.add_parser("score", help="Score thumbnails from old CSV or cleaned Parquet classifications.")
+    score = subparsers.add_parser("score", help="Score thumbnails/review units from CSV or cleaned Parquet classifications.")
     score.add_argument("input", type=Path, help="Path to reparsed.csv(.gz) or cleaned_classifications.parquet.")
     score.add_argument("--output-dir", type=Path, default=Path("results"), help="Directory for output CSVs.")
     score.add_argument("--label", default=None, help="Filename date/label, e.g. 2025_1_13. Defaults to today.")
-    score.add_argument("--mode", choices=["naive", "time", "legacy"], default="naive")
+    score.add_argument("--mode", choices=["naive", "time", "legacy", "rubin"], default="naive")
     score.add_argument("--cutoff", type=float, default=DEFAULT_CUTOFF)
     score.add_argument("--weights", nargs=3, type=float, metavar=("A", "B", "C"), default=(7.0, 2.0, 1.0))
     score.add_argument("--max-user-classifications", type=int, default=10_000)
@@ -49,7 +50,13 @@ def build_parser() -> argparse.ArgumentParser:
     score.add_argument(
         "--keep-duplicate-user-thumbs",
         action="store_true",
-        help="Count repeated classifications by the same user on the same thumbnail.",
+        help="Count repeated classifications by the same user on the same thumbnail/review unit.",
+    )
+    score.add_argument(
+        "--chunk-size",
+        type=int,
+        default=100_000,
+        help="Rows per chunk for Rubin CSV/Parquet scoring.",
     )
     score.add_argument(
         "--all-same-shortcut",
@@ -101,6 +108,32 @@ def run_score(args: argparse.Namespace) -> int:
     )
 
     start = time.perf_counter()
+    if args.mode == "rubin":
+        config = RubinScoringConfig(
+            metric_weights=tuple(args.weights),
+            max_user_classifications=args.max_user_classifications,
+            min_user_classifications=min_user_classifications,
+            cutoff=args.cutoff,
+            chunk_size=args.chunk_size,
+            dedupe_user_review_units=not args.keep_duplicate_user_thumbs,
+            problematic_training_review_units=problematic,
+        )
+        loaded = time.perf_counter()
+        result = score_rubin_file(args.input, config)
+        scored = time.perf_counter()
+        paths = write_rubin_outputs(result, args.output_dir, args.label, args.cutoff)
+        written = time.perf_counter()
+        result.diagnostics.update(
+            {
+                "load_seconds": round(loaded - start, 3),
+                "score_seconds": round(scored - loaded, 3),
+                "write_seconds": round(written - scored, 3),
+                "total_seconds": round(written - start, 3),
+            }
+        )
+        _print_json({"diagnostics": result.diagnostics, "outputs": paths})
+        return 0
+
     frame = load_classifications(args.input)
     loaded = time.perf_counter()
     result = score_classifications(frame, config)

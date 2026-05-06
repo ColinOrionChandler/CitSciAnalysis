@@ -65,6 +65,31 @@ This writes:
 - `output_<label>.csv`: only rows at or above the cutoff, default `0.473`.
 - `user_weights_<label>.csv`: volunteer weight diagnostics.
 
+Score Rubin Comet Catchers data with chunked, object-level aggregation:
+
+```bash
+PYTHONPATH=src python3 -m citsci_analysis score \
+  "/path/to/rubin_comet_catchers/reparsed_z/cleaned_classifications.parquet" \
+  --output-dir results \
+  --label rubin_2026_5_1 \
+  --mode rubin \
+  --chunk-size 100000
+```
+
+Rubin mode treats each current image as a `review_unit_id` and each `class` as
+the `object_id`. If `class` is missing, it falls back to `subject_id`, then to a
+deterministic filename prefix. It writes:
+
+- `rubin_review_unit_scores_<label>.csv`: image/pair-level scores.
+- `rubin_object_scores_<label>.csv`: object-level scores ranked by top-3 mean
+  review-unit score, with mean, peak, vote count, and best review unit.
+- `rubin_user_weights_<label>.csv`: volunteer weight diagnostics.
+
+Future paired Rubin subjects should include explicit subject metadata for
+`object_id`, `review_unit_id`, `image_ids`, `image_count`, and ordered image
+roles when order matters. Then the review unit can become the submitted pair
+without changing object-level aggregation.
+
 Compare a modern output file to a historic total output:
 
 ```bash
