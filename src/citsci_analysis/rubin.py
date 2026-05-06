@@ -75,6 +75,30 @@ class RubinScoreResult:
     diagnostics: Mapping[str, float | int | str]
 
 
+@dataclass(frozen=True)
+class RubinProgressEvent:
+    event: str
+    phase: str
+    rows: int = 0
+    chunks: int = 0
+    total_rows: Optional[int] = None
+
+
+ProgressCallback = Callable[[RubinProgressEvent], None]
+
+
+def _emit_progress(
+    progress: Optional[ProgressCallback],
+    event: str,
+    phase: str,
+    rows: int = 0,
+    chunks: int = 0,
+    total_rows: Optional[int] = None,
+) -> None:
+    if progress is not None:
+        progress(RubinProgressEvent(event, phase, int(rows), int(chunks), total_rows))
+
+
 def _existing_columns_for_parquet(path: Path, wanted: Iterable[str]) -> list[str]:
     try:
         import pyarrow.parquet as pq
@@ -98,6 +122,18 @@ def _existing_columns(path: Path, wanted: Iterable[str]) -> list[str]:
     if suffixes.endswith(".csv") or suffixes.endswith(".csv.gz"):
         return _existing_columns_for_csv(path, wanted)
     raise ValueError(f"Unsupported Rubin input format: {path}")
+
+
+def _rubin_input_row_count(path: Path) -> Optional[int]:
+    if path.suffix.lower() != ".parquet":
+        return None
+
+    try:
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise ImportError("Rubin Parquet scoring requires pyarrow. Install project requirements first.") from exc
+
+    return int(pq.ParquetFile(path).metadata.num_rows)
 
 
 def iter_rubin_file_chunks(path: str | Path, config: RubinScoringConfig) -> Iterator[pd.DataFrame]:
@@ -314,7 +350,10 @@ def _prepare_chunk_factory(
 
 
 def _first_pass(
-    chunk_factory: Callable[[], Iterable[pd.DataFrame]], config: RubinScoringConfig
+    chunk_factory: Callable[[], Iterable[pd.DataFrame]],
+    config: RubinScoringConfig,
+    progress: Optional[ProgressCallback] = None,
+    total_rows: Optional[int] = None,
 ) -> tuple[pd.DataFrame, dict[str, dict[str, object]], dict[str, int | float]]:
     user_seen: dict[str, int] = {}
     user_stats: dict[str, dict[str, int]] = {}
@@ -325,8 +364,13 @@ def _first_pass(
         "training_rows": 0,
     }
 
+    phase = "Pass 1/2: user weights"
+    _emit_progress(progress, "start", phase, total_rows=total_rows)
+
     row_offset = 0
+    chunk_count = 0
     for raw in chunk_factory():
+        chunk_count += 1
         chunk = normalize_rubin_chunk(raw, row_offset, config)
         row_offset += len(raw)
         diagnostics["rows"] += int(len(chunk))
@@ -363,6 +407,10 @@ def _first_pass(
         )
         grouped = stats.loc[stats_mask].groupby("user_key", sort=False, dropna=False).sum()
         _add_grouped_stats(user_stats, grouped)
+        _emit_progress(progress, "update", phase, row_offset, chunk_count, total_rows)
+
+    _emit_progress(progress, "finish", phase, row_offset, chunk_count, total_rows)
+    _emit_progress(progress, "message", "Calculating user weights...")
 
     all_users = sorted(set(user_seen) | set(user_stats))
     user_weights = pd.DataFrame(index=pd.Index(all_users, name="user_key"))
@@ -376,6 +424,7 @@ def _first_pass(
         user_weights["test_count"],
         config.metric_weights,
     )
+    _emit_progress(progress, "message", f"Calculated weights for {len(user_weights):,} users.")
     return user_weights.reset_index(), registry, diagnostics
 
 
@@ -491,28 +540,40 @@ def _score_review_units(
     user_weights: pd.DataFrame,
     registry: dict[str, dict[str, object]],
     config: RubinScoringConfig,
+    progress: Optional[ProgressCallback] = None,
+    total_rows: Optional[int] = None,
 ) -> tuple[pd.DataFrame, int]:
+    phase = "Pass 2/2: score review units"
+    _emit_progress(progress, "start", phase, total_rows=total_rows)
+
     with tempfile.TemporaryDirectory(prefix="rubin_votes_") as temporary_directory:
         database_path = Path(temporary_directory) / "votes.sqlite"
         connection = sqlite3.connect(database_path)
         try:
             _sqlite_vote_table(connection, config.dedupe_user_review_units)
             row_offset = 0
+            chunk_count = 0
             for raw in chunk_factory():
+                chunk_count += 1
                 chunk = normalize_rubin_chunk(raw, row_offset, config)
                 row_offset += len(raw)
                 votes = _prepare_votes(chunk, user_weights, config)
                 _insert_votes(connection, votes, config.dedupe_user_review_units)
                 connection.commit()
+                _emit_progress(progress, "update", phase, row_offset, chunk_count, total_rows)
 
+            _emit_progress(progress, "finish", phase, row_offset, chunk_count, total_rows)
+            _emit_progress(progress, "message", "Aggregating review unit votes...")
             scored_votes = int(connection.execute("SELECT COUNT(*) FROM votes").fetchone()[0])
             grouped = _aggregate_votes(connection)
+            _emit_progress(progress, "message", f"Aggregated {scored_votes:,} scored votes.")
         finally:
             connection.close()
 
     registry_frame = pd.DataFrame(registry.values())
     if registry_frame.empty:
         registry_frame = pd.DataFrame(columns=["review_unit_id", "object_id", "subject_id", "batch"])
+    _emit_progress(progress, "message", "Finalizing review unit scores...")
     review_units = registry_frame.merge(grouped, on="review_unit_id", how="left", suffixes=("", "_scored"))
     for column in ("object_id", "subject_id", "batch"):
         scored_column = f"{column}_scored"
@@ -591,14 +652,25 @@ def _build_object_scores(review_units: pd.DataFrame, top_k: int) -> pd.DataFrame
 def score_rubin_chunks(
     chunks: Callable[[], Iterable[pd.DataFrame]] | Iterable[pd.DataFrame],
     config: RubinScoringConfig | None = None,
+    progress: Optional[ProgressCallback] = None,
+    total_rows: Optional[int] = None,
 ) -> RubinScoreResult:
     """Score Rubin classifications from a reusable chunk source."""
 
     active_config = config or RubinScoringConfig()
     chunk_factory = _prepare_chunk_factory(chunks)
-    user_weights, registry, diagnostics = _first_pass(chunk_factory, active_config)
-    review_units, scored_votes = _score_review_units(chunk_factory, user_weights, registry, active_config)
+    user_weights, registry, diagnostics = _first_pass(chunk_factory, active_config, progress, total_rows)
+    review_units, scored_votes = _score_review_units(
+        chunk_factory,
+        user_weights,
+        registry,
+        active_config,
+        progress,
+        total_rows,
+    )
+    _emit_progress(progress, "message", "Building object scores...")
     object_scores = _build_object_scores(review_units, active_config.top_k)
+    _emit_progress(progress, "message", f"Built {len(object_scores):,} object scores.")
 
     diagnostics.update(
         {
@@ -621,9 +693,19 @@ def score_rubin_chunks(
     )
 
 
-def score_rubin_file(path: str | Path, config: RubinScoringConfig | None = None) -> RubinScoreResult:
+def score_rubin_file(
+    path: str | Path,
+    config: RubinScoringConfig | None = None,
+    progress: Optional[ProgressCallback] = None,
+) -> RubinScoreResult:
     active_config = config or RubinScoringConfig()
-    return score_rubin_chunks(lambda: iter_rubin_file_chunks(path, active_config), active_config)
+    total_rows = _rubin_input_row_count(Path(path))
+    return score_rubin_chunks(
+        lambda: iter_rubin_file_chunks(path, active_config),
+        active_config,
+        progress,
+        total_rows,
+    )
 
 
 def write_rubin_outputs(

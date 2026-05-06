@@ -85,6 +85,11 @@ deterministic filename prefix. It writes:
   review-unit score, with mean, peak, vote count, and best review unit.
 - `rubin_user_weights_<label>.csv`: volunteer weight diagnostics.
 
+In an interactive terminal, `score` writes `tqdm` progress to stderr while
+preserving the final JSON summary on stdout. Parquet inputs include total rows
+and ETA; CSV inputs report rows and rate. Use `--progress always` to force
+progress in logs, or `--progress never` to silence it.
+
 Future paired Rubin subjects should include explicit subject metadata for
 `object_id`, `review_unit_id`, `image_ids`, `image_count`, and ordered image
 roles when order matters. Then the review unit can become the submitted pair

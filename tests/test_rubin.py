@@ -121,3 +121,34 @@ def test_rubin_cli_writes_rubin_outputs(tmp_path) -> None:
     objects = pd.read_csv(object_path)
     assert {"object_id", "object_score", "best_review_unit"}.issubset(objects.columns)
     assert "object-a" in set(objects["object_id"])
+
+
+def test_rubin_cli_progress_reports_chunk_passes(tmp_path, capsys) -> None:
+    input_path = tmp_path / "rubin.csv"
+    output_dir = tmp_path / "results"
+    _rubin_frame().to_csv(input_path, index=False)
+
+    status = main(
+        [
+            "score",
+            str(input_path),
+            "--output-dir",
+            str(output_dir),
+            "--label",
+            "test",
+            "--mode",
+            "rubin",
+            "--chunk-size",
+            "3",
+            "--progress",
+            "always",
+        ]
+    )
+
+    assert status == 0
+    captured = capsys.readouterr()
+    assert "Pass 1/2: user weights" in captured.err
+    assert "Pass 2/2: score review units" in captured.err
+    assert "Aggregating review unit votes..." in captured.err
+    assert "Writing Rubin outputs..." in captured.err
+    assert '"diagnostics"' in captured.out
