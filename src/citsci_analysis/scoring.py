@@ -124,6 +124,19 @@ def first_present_column(frame: pd.DataFrame, names: Iterable[str]) -> pd.Series
     return pd.Series(pd.NA, index=frame.index)
 
 
+def coalesce_present_columns(frame: pd.DataFrame, names: Iterable[str]) -> pd.Series:
+    """Return the first non-empty value per row from the requested columns."""
+
+    combined = pd.Series(pd.NA, index=frame.index, dtype="string")
+    for name in names:
+        if name not in frame.columns:
+            continue
+        candidate = frame[name].astype("string").str.strip()
+        candidate = candidate.mask(candidate.str.lower().isin(FALSE_STRINGS))
+        combined = combined.combine_first(candidate)
+    return combined
+
+
 def normalize_thumbnames(values: pd.Series) -> pd.Series:
     """Normalize thumbnails to basename without image/fits suffixes."""
 
@@ -134,6 +147,8 @@ def normalize_thumbnames(values: pd.Series) -> pd.Series:
 
 
 def normalize_answers(frame: pd.DataFrame) -> pd.Series:
+    """Normalize old yes/no values or cleaned numeric answers to 0/1 floats."""
+
     if "answer" in frame.columns:
         answer = pd.to_numeric(frame["answer"], errors="coerce")
         return answer.where(answer.isin([0.0, 1.0]))
@@ -146,6 +161,8 @@ def normalize_answers(frame: pd.DataFrame) -> pd.Series:
 
 
 def normalize_bool(values: pd.Series, *, default: bool = False) -> pd.Series:
+    """Normalize bool-like export values while preserving a caller-supplied default."""
+
     if values.dtype == bool:
         return values.fillna(default).astype(bool)
     text = values.astype("string").str.strip().str.lower()
@@ -155,7 +172,21 @@ def normalize_bool(values: pd.Series, *, default: bool = False) -> pd.Series:
     return result
 
 
+def _normalize_identifier_values(values: pd.Series) -> pd.Series:
+    """Stringify IDs while avoiding CSV-inferred integer values like ``42.0``."""
+
+    text = values.astype("string").str.strip()
+    numeric = pd.to_numeric(values, errors="coerce")
+    integerish_float_text = text.str.match(r"^-?\d+\.0+$").fillna(False)
+    integral = numeric.notna() & np.isclose(numeric % 1, 0) & integerish_float_text
+    if integral.any():
+        text.loc[integral] = numeric.loc[integral].astype("Int64").astype("string")
+    return text.mask(text.str.lower().isin(FALSE_STRINGS))
+
+
 def build_user_key(frame: pd.DataFrame) -> pd.Series:
+    """Build a stable volunteer key from name, then ID/IP/classification fallback."""
+
     user_name = first_present_column(frame, ["user_name", "username"]).astype("string").str.strip()
     user_name = user_name.mask(user_name.str.lower().isin(FALSE_STRINGS))
 
@@ -163,8 +194,7 @@ def build_user_key(frame: pd.DataFrame) -> pd.Series:
     for column, prefix in (("user_id", "user_id:"), ("user_ip", "user_ip:"), ("classification_id", "classification:")):
         if column not in frame.columns:
             continue
-        candidate = frame[column].astype("string").str.strip()
-        candidate = candidate.mask(candidate.str.lower().isin(FALSE_STRINGS))
+        candidate = _normalize_identifier_values(frame[column])
         candidate = prefix + candidate
         fallback = fallback.combine_first(candidate)
 
@@ -175,7 +205,7 @@ def load_classifications(path: str | Path) -> pd.DataFrame:
     """Load and normalize classifications from old CSV or new cleaned Parquet."""
 
     raw = read_table(path)
-    thumb_source = first_present_column(raw, ["thumbname", "filename"])
+    thumb_source = coalesce_present_columns(raw, ["thumbname", "filename"])
     normalized = pd.DataFrame(
         {
             "row_order": np.arange(len(raw), dtype=np.int64),
@@ -290,6 +320,8 @@ def _stat_columns(frame: pd.DataFrame, config: ScoringConfig) -> pd.DataFrame:
 
 
 def compute_static_user_weights(frame: pd.DataFrame, config: ScoringConfig) -> pd.DataFrame:
+    """Compute one final volunteer weight per user for static scoring."""
+
     stats = _stat_columns(frame, config)
     grouped = stats.groupby("user_key", sort=False, dropna=False).agg(
         train_count=("train_count", "sum"),
@@ -309,6 +341,8 @@ def compute_static_user_weights(frame: pd.DataFrame, config: ScoringConfig) -> p
 
 
 def compute_time_row_weights(frame: pd.DataFrame, config: ScoringConfig) -> tuple[pd.Series, pd.DataFrame]:
+    """Compute a cumulative volunteer weight at each classification row."""
+
     stats = _stat_columns(frame, config)
     grouped_stats = stats.groupby("user_key", sort=False, dropna=False)
     cumulative = grouped_stats[["train_count", "train_yes_count", "test_count", "test_yes_count"]].cumsum()
@@ -371,6 +405,8 @@ def compute_legacy_polynomial_row_weights(frame: pd.DataFrame, config: ScoringCo
 
 
 def row_weights_for_mode(frame: pd.DataFrame, config: ScoringConfig) -> tuple[pd.Series, pd.DataFrame]:
+    """Dispatch thumbnail scoring to the requested user-weighting mode."""
+
     mode = config.mode.lower()
     if mode == "naive":
         user_weights = compute_static_user_weights(frame, config)
@@ -465,6 +501,8 @@ def default_label(today: Optional[date] = None) -> str:
 
 
 def write_score_outputs(result: ScoreResult, output_dir: str | Path, label: Optional[str], cutoff: float) -> Mapping[str, Path]:
+    """Write full, cutoff-filtered, and volunteer-weight CSV outputs."""
+
     outdir = Path(output_dir)
     outdir.mkdir(parents=True, exist_ok=True)
     output_label = label or default_label()
@@ -493,6 +531,8 @@ def _read_score_file(path: str | Path) -> tuple[pd.DataFrame, dict[str, int]]:
 
 
 def compare_score_files(reference_path: str | Path, candidate_path: str | Path, diff_output: str | Path | None = None) -> Mapping[str, float | int]:
+    """Compare two total score files after normalizing duplicate thumbnail rows."""
+
     reference, reference_info = _read_score_file(reference_path)
     candidate, candidate_info = _read_score_file(candidate_path)
     joined = reference.merge(candidate, on="thumbname", how="outer", suffixes=("_reference", "_candidate"), indicator=True)
@@ -529,6 +569,8 @@ def compare_score_files(reference_path: str | Path, candidate_path: str | Path, 
 
 
 def inspect_inputs(old_csv: str | Path, new_parquet: str | Path) -> Mapping[str, object]:
+    """Report how an old reparsed CSV maps onto a cleaned Parquet export."""
+
     old = load_classifications(old_csv)
     new = load_classifications(new_parquet)
 

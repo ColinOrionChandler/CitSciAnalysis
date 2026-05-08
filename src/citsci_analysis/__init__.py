@@ -1,4 +1,4 @@
-"""Modern scoring tools for Active Asteroids citizen-science classifications."""
+"""Modern scoring tools for Active Asteroids and Rubin Comet Catchers."""
 
 from .scoring import (
     ScoringConfig,

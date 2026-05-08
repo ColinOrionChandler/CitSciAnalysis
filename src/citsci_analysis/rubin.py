@@ -1,3 +1,12 @@
+"""Chunked scoring for Rubin Comet Catchers classifications.
+
+Rubin subjects are scored at two grains. A review unit is the thing a
+volunteer judged, currently one image and eventually an ordered pair or other
+metadata-defined bundle. An object is the scientific target that can have many
+review units. The scorer preserves both IDs so future paired-image workflows can
+change the review-unit definition without changing the object ranking output.
+"""
+
 from __future__ import annotations
 
 import math
@@ -69,6 +78,8 @@ class RubinScoringConfig:
 
 @dataclass
 class RubinScoreResult:
+    """All score tables plus scalar diagnostics produced by Rubin scoring."""
+
     review_unit_scores: pd.DataFrame
     object_scores: pd.DataFrame
     user_weights: pd.DataFrame
@@ -77,6 +88,8 @@ class RubinScoreResult:
 
 @dataclass(frozen=True)
 class RubinProgressEvent:
+    """Progress event emitted by streaming Rubin passes."""
+
     event: str
     phase: str
     rows: int = 0
@@ -137,6 +150,8 @@ def _rubin_input_row_count(path: Path) -> Optional[int]:
 
 
 def iter_rubin_file_chunks(path: str | Path, config: RubinScoringConfig) -> Iterator[pd.DataFrame]:
+    """Yield only the Rubin columns needed for scoring from CSV or Parquet."""
+
     input_path = Path(path)
     columns = _existing_columns(input_path, RUBIN_COLUMNS)
     suffixes = "".join(input_path.suffixes).lower()
@@ -209,6 +224,8 @@ def _combined_present_columns(frame: pd.DataFrame, names: Iterable[str]) -> pd.S
 
 
 def _metadata_lookup(payload: object, keys: Iterable[str]) -> object:
+    """Find the first matching metadata value in nested subject payloads."""
+
     if _is_missing_value(payload):
         return pd.NA
 
@@ -230,6 +247,8 @@ def _metadata_lookup(payload: object, keys: Iterable[str]) -> object:
         current = stack.pop()
         if not isinstance(current, dict):
             continue
+        # Zooniverse exports may retain metadata names with or without a
+        # leading "#"; paired-subject metadata can also be nested by image slot.
         for key in key_options:
             value = current.get(key)
             if value is not None and not _is_missing_value(value):
@@ -249,6 +268,13 @@ def _metadata_values(frame: pd.DataFrame, keys: Iterable[str]) -> pd.Series:
 
 
 def normalize_rubin_chunk(raw: pd.DataFrame, row_offset: int, config: RubinScoringConfig) -> pd.DataFrame:
+    """Normalize a raw Rubin chunk into the schema used by both scoring passes.
+
+    ID precedence is deliberate: explicit columns win, then metadata, then
+    current-export fallbacks. That lets a future paired subject identify the
+    review unit explicitly while current image-level exports still score.
+    """
+
     review_candidates = [config.review_unit_column] if config.review_unit_column else []
     review_candidates += ["review_unit_id", "pair_id"]
     review_source = _combined_present_columns(raw, [name for name in review_candidates if name])
@@ -355,6 +381,8 @@ def _first_pass(
     progress: Optional[ProgressCallback] = None,
     total_rows: Optional[int] = None,
 ) -> tuple[pd.DataFrame, dict[str, dict[str, object]], dict[str, int | float]]:
+    """Stream once to build volunteer weights and the review-unit registry."""
+
     user_seen: dict[str, int] = {}
     user_stats: dict[str, dict[str, int]] = {}
     registry: dict[str, dict[str, object]] = {}
@@ -380,6 +408,8 @@ def _first_pass(
 
         has_user = chunk["user_key"].notna()
         if has_user.any():
+            # The per-user cap must be stable across chunk boundaries, so keep
+            # the previous count and add each user's within-chunk order.
             prior = chunk.loc[has_user, "user_key"].astype(str).map(user_seen).fillna(0).astype("int64")
             within = chunk.loc[has_user].groupby("user_key", sort=False).cumcount() + 1
             user_index = pd.Series(pd.NA, index=chunk.index, dtype="Int64")
@@ -429,6 +459,8 @@ def _first_pass(
 
 
 def _prepare_votes(chunk: pd.DataFrame, user_weights: pd.DataFrame, config: RubinScoringConfig) -> pd.DataFrame:
+    """Attach final volunteer weights to valid review-unit votes."""
+
     user_lookup = user_weights.set_index("user_key")
     weights = user_lookup["weight"]
     classification_counts = user_lookup["classification_count"]
@@ -445,6 +477,8 @@ def _prepare_votes(chunk: pd.DataFrame, user_weights: pd.DataFrame, config: Rubi
 
 
 def _sqlite_vote_table(connection: sqlite3.Connection, dedupe: bool) -> None:
+    """Create the temporary vote table used for cross-chunk aggregation."""
+
     connection.execute("DROP TABLE IF EXISTS votes")
     if dedupe:
         connection.execute(
@@ -480,6 +514,8 @@ def _sqlite_vote_table(connection: sqlite3.Connection, dedupe: bool) -> None:
 
 
 def _insert_votes(connection: sqlite3.Connection, votes: pd.DataFrame, dedupe: bool) -> None:
+    """Insert scored votes, optionally keeping the latest user vote per review unit."""
+
     if votes.empty:
         return
     columns = ["review_unit_id", "user_key", "row_order", "object_id", "subject_id", "batch", "answer", "weight"]
@@ -517,6 +553,8 @@ def _insert_votes(connection: sqlite3.Connection, votes: pd.DataFrame, dedupe: b
 
 
 def _aggregate_votes(connection: sqlite3.Connection) -> pd.DataFrame:
+    """Collapse the temporary vote table into one weighted score row per review unit."""
+
     return pd.read_sql_query(
         """
         SELECT
@@ -543,6 +581,8 @@ def _score_review_units(
     progress: Optional[ProgressCallback] = None,
     total_rows: Optional[int] = None,
 ) -> tuple[pd.DataFrame, int]:
+    """Stream a second time to score review units with final user weights."""
+
     phase = "Pass 2/2: score review units"
     _emit_progress(progress, "start", phase, total_rows=total_rows)
 
@@ -604,6 +644,13 @@ def _top_k_mean(values: pd.Series, top_k: int) -> float:
 
 
 def _build_object_scores(review_units: pd.DataFrame, top_k: int) -> pd.DataFrame:
+    """Roll review-unit scores up to object rankings.
+
+    The primary object score is the top-k mean, which rewards objects with more
+    than one strong review unit without letting a large number of low-confidence
+    images swamp the ranking.
+    """
+
     if review_units.empty:
         return pd.DataFrame(
             columns=[
@@ -698,6 +745,8 @@ def score_rubin_file(
     config: RubinScoringConfig | None = None,
     progress: Optional[ProgressCallback] = None,
 ) -> RubinScoreResult:
+    """Score a CSV or Parquet Rubin export from disk."""
+
     active_config = config or RubinScoringConfig()
     total_rows = _rubin_input_row_count(Path(path))
     return score_rubin_chunks(
@@ -711,6 +760,8 @@ def score_rubin_file(
 def write_rubin_outputs(
     result: RubinScoreResult, output_dir: str | Path, label: Optional[str], cutoff: float
 ) -> Mapping[str, Path]:
+    """Write Rubin review-unit, object, and volunteer-weight CSV outputs."""
+
     outdir = Path(output_dir)
     outdir.mkdir(parents=True, exist_ok=True)
     output_label = label or default_label()

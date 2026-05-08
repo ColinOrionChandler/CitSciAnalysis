@@ -112,6 +112,24 @@ PYTHONPATH=src python3 -m citsci_analysis inspect-inputs \
   "/path/to/reparsed_z/cleaned_classifications.parquet"
 ```
 
+## Development Checks
+
+Run the test suite from an environment with the project dependencies installed:
+
+```bash
+PYTHONPATH=src python3 -m pytest
+```
+
+For a quick coverage audit:
+
+```bash
+PYTHONPATH=src python3 -m pytest --cov=citsci_analysis --cov-report=term-missing
+```
+
+The highest-value coverage areas are the scoring invariants: input
+normalization, duplicate-vote handling, user-weight modes, Rubin review-unit to
+object aggregation, CLI output routing, and comparison/report utilities.
+
 ## 2025-01-10 Batch-30 Benchmark
 
 Using the Dropbox benchmark folder named `20250110 through batch 30`:

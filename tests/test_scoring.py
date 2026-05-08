@@ -3,11 +3,17 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from citsci_analysis.cli import main
 from citsci_analysis.scoring import (
     ScoringConfig,
     calculate_metric_weight,
+    compare_score_files,
+    load_classifications,
+    load_problematic_training_thumbs,
     normalize_thumbnames,
+    row_weights_for_mode,
     score_classifications,
+    write_score_outputs,
 )
 
 
@@ -50,3 +56,196 @@ def test_naive_scoring_uses_static_user_weights_and_dedupes() -> None:
     assert 0.0 <= scores["test_a"] <= 1.0
     assert scores["test_b"] == 0.0
     assert result.diagnostics["thumbnails"] == 3
+
+
+def test_load_classifications_normalizes_csv_columns_and_user_fallbacks(tmp_path) -> None:
+    input_path = tmp_path / "classifications.csv"
+    pd.DataFrame(
+        {
+            "classification_id": [11, 12, 13],
+            "username": ["alice", None, ""],
+            "user_id": [None, "42", None],
+            "user_ip": [None, None, "127.0.0.1"],
+            "thumbname": ["/tmp/first.fits.fz", None, "third.png"],
+            "filename": [None, "second.fits", None],
+            "value": ["yes", "no", "maybe"],
+            "train": ["true", "", None],
+            "batch": ["1", "2", None],
+        }
+    ).to_csv(input_path, index=False)
+
+    normalized = load_classifications(input_path)
+
+    assert normalized["thumbname"].tolist() == ["first", "second", "third"]
+    assert normalized["user_key"].tolist() == ["alice", "user_id:42", "user_ip:127.0.0.1"]
+    assert normalized["answer"].iloc[:2].tolist() == [1.0, 0.0]
+    assert np.isnan(normalized["answer"].iloc[2])
+    assert normalized["train"].tolist() == [True, False, False]
+
+
+def test_load_problematic_training_thumbs_accepts_csv_variants(tmp_path) -> None:
+    input_path = tmp_path / "problematic.csv"
+    pd.DataFrame(
+        {
+            "thumb_name": ["/tmp/bad_one.png", "good_one.fits"],
+            "Problematic Yes/No": ["Yes", "No"],
+        }
+    ).to_csv(input_path, index=False)
+
+    assert load_problematic_training_thumbs(input_path) == frozenset({"bad_one"})
+
+
+def test_score_classifications_respects_vote_cap_and_all_same_shortcut() -> None:
+    frame = pd.DataFrame(
+        {
+            "row_order": range(3),
+            "classification_id": range(3),
+            "user_key": ["u1", "u2", "u3"],
+            "user_name": ["u1", "u2", "u3"],
+            "thumbname": ["target", "target", "target"],
+            "answer": [1.0, 1.0, 0.0],
+            "train": [False, False, False],
+            "batch": [1, 1, 1],
+            "started_at": pd.NaT,
+            "finished_at": pd.NaT,
+        }
+    )
+
+    result = score_classifications(
+        frame,
+        ScoringConfig(max_votes_per_thumb=2, dedupe_user_thumbnail=False, score_all_same_shortcut=True),
+    )
+    target = result.scores.set_index("thumbname").loc["target"]
+
+    assert target["vote_count"] == 2
+    assert target["score"] == 1.0
+
+
+def test_time_and_legacy_modes_return_row_weights() -> None:
+    frame = pd.DataFrame(
+        {
+            "row_order": range(6),
+            "classification_id": range(6),
+            "user_key": ["u1", "u1", "u1", "u2", "u2", "u2"],
+            "user_name": ["u1", "u1", "u1", "u2", "u2", "u2"],
+            "thumbname": ["train", "a", "b", "train", "a", "b"],
+            "answer": [1.0, 1.0, 0.0, 1.0, 0.0, 0.0],
+            "train": [True, False, False, True, False, False],
+            "batch": [1, 1, 1, 1, 1, 1],
+            "started_at": pd.NaT,
+            "finished_at": pd.NaT,
+        }
+    )
+
+    for mode in ("time", "legacy"):
+        row_weights, user_weights = row_weights_for_mode(frame, ScoringConfig(mode=mode))
+        assert len(row_weights) == len(frame)
+        assert np.isfinite(row_weights).all()
+        assert set(user_weights["user_key"]) == {"u1", "u2"}
+
+
+def test_write_and_compare_score_outputs_average_duplicate_reference(tmp_path) -> None:
+    frame = pd.DataFrame(
+        {
+            "row_order": [0, 1],
+            "classification_id": [0, 1],
+            "user_key": ["u1", "u2"],
+            "user_name": ["u1", "u2"],
+            "thumbname": ["a", "b"],
+            "answer": [1.0, 0.0],
+            "train": [False, False],
+            "batch": [1, 1],
+            "started_at": pd.NaT,
+            "finished_at": pd.NaT,
+        }
+    )
+    result = score_classifications(frame, ScoringConfig())
+    paths = write_score_outputs(result, tmp_path / "out", "candidate", cutoff=0.5)
+    reference_path = tmp_path / "reference.csv"
+    diff_path = tmp_path / "diff.csv"
+    pd.DataFrame(
+        {
+            "thumb_name": ["a.png", "a.png", "b.png"],
+            "score": [1.0, 1.0, 0.0],
+        }
+    ).to_csv(reference_path, index=False)
+
+    report = compare_score_files(reference_path, paths["total"], diff_path)
+
+    assert report["reference_rows"] == 3
+    assert report["reference_duplicate_rows"] == 2
+    assert report["matched_thumbnails"] == 2
+    assert diff_path.exists()
+
+
+def test_cli_scores_active_asteroids_csv_with_progress(tmp_path, capsys) -> None:
+    input_path = tmp_path / "classifications.csv"
+    output_dir = tmp_path / "results"
+    pd.DataFrame(
+        {
+            "classification_id": [1, 2],
+            "username": ["u1", "u2"],
+            "thumbname": ["active.png", "quiet.png"],
+            "value": ["yes", "no"],
+            "train": [None, None],
+            "batch": [1, 1],
+        }
+    ).to_csv(input_path, index=False)
+
+    status = main(
+        [
+            "score",
+            str(input_path),
+            "--output-dir",
+            str(output_dir),
+            "--label",
+            "active",
+            "--mode",
+            "naive",
+            "--progress",
+            "always",
+        ]
+    )
+
+    assert status == 0
+    captured = capsys.readouterr()
+    assert "Loading input table..." in captured.err
+    assert '"diagnostics"' in captured.out
+    assert (output_dir / "output_total_active.csv").exists()
+    assert (output_dir / "user_weights_active.csv").exists()
+
+
+def test_cli_compare_and_inspect_inputs(tmp_path, capsys) -> None:
+    old_csv = tmp_path / "old.csv"
+    new_parquet = tmp_path / "new.parquet"
+    pd.DataFrame(
+        {
+            "classification_id": [1],
+            "username": ["u1"],
+            "thumbname": ["same.png"],
+            "value": ["yes"],
+            "train": ["false"],
+        }
+    ).to_csv(old_csv, index=False)
+    pd.DataFrame(
+        {
+            "classification_id": [1],
+            "user_name": ["u1"],
+            "thumbname": ["same.png"],
+            "answer": [1.0],
+            "train": [False],
+        }
+    ).to_parquet(new_parquet, index=False)
+
+    assert main(["inspect-inputs", str(old_csv), str(new_parquet)]) == 0
+    inspect_output = capsys.readouterr().out
+    assert '"old_rows": 1' in inspect_output
+
+    reference_path = tmp_path / "reference.csv"
+    candidate_path = tmp_path / "candidate.csv"
+    pd.DataFrame({"thumbname": ["same"], "score": [1.0]}).to_csv(reference_path, index=False)
+    pd.DataFrame({"thumbname": ["same"], "score": [0.8]}).to_csv(candidate_path, index=False)
+
+    assert main(["compare", str(reference_path), str(candidate_path)]) == 0
+    compare_output = capsys.readouterr().out
+    assert '"matched_thumbnails": 1' in compare_output

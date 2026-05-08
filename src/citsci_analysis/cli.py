@@ -25,6 +25,8 @@ def _print_json(payload: object) -> None:
 
 
 def _progress_enabled(setting: str, stream: TextIO) -> bool:
+    """Resolve the CLI progress setting against the current stderr stream."""
+
     if setting == "always":
         return True
     if setting == "never":
@@ -33,6 +35,8 @@ def _progress_enabled(setting: str, stream: TextIO) -> bool:
 
 
 class _RubinProgressPrinter:
+    """Render Rubin progress events without contaminating stdout JSON."""
+
     _MIN_INTERVAL_SECONDS = 0.25
     _BAR_WIDTH = 28
 
