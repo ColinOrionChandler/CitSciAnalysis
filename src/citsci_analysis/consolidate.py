@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+import argparse
 import csv
+import json
 import re
+import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-import pandas as pd
-
-from .scoring import FALSE_STRINGS, normalize_thumbnames
+try:
+    from .scoring import FALSE_STRINGS
+except ImportError:
+    if __package__ not in {None, ""}:
+        raise
+    FALSE_STRINGS = {"", "0", "0.0", "false", "f", "no", "n", "none", "nan", "null", "na", "n/a", "<na>"}
 
 
 THUMBNAIL_COLUMNS = ("thumbnail_basename", "thumbname", "thumb_name", "ThumbName", "thumbnail", "filename")
@@ -30,7 +37,7 @@ class ConsolidationResult:
 @dataclass(frozen=True)
 class _ParsedRow:
     datetime: str
-    parsed_datetime: Optional[pd.Timestamp]
+    parsed_datetime: Optional[datetime]
     has_datetime: bool
     malformed_datetime: bool
     path: str
@@ -74,7 +81,7 @@ def consolidate_score_directory(
     next_input_order = 0
 
     for file_index, csv_path in enumerate(csv_paths, start=1):
-        if progress is not None and (file_index == 1 or file_index % 100 == 0 or file_index == len(csv_paths)):
+        if progress is not None:
             progress(f"Parsing CSV {file_index:,}/{len(csv_paths):,}: {csv_path}")
 
         file_rows, file_input_rows, file_skipped = _parse_score_csv(csv_path, next_input_order)
@@ -105,21 +112,27 @@ def consolidate_score_directory(
 def _parse_score_csv(path: Path, input_order_start: int) -> tuple[list[_ParsedRow], int, int]:
     with path.open(newline="") as handle:
         reader = csv.reader(handle)
-        rows = list(reader)
+        try:
+            header = next(reader)
+        except StopIteration:
+            return [], 0, 0
 
-    if not rows:
-        return [], 0, 0
-
-    header = rows[0]
-    if _looks_like_headered_score_file(header):
-        return _parse_headered_rows(header, rows[1:], input_order_start)
-    return _parse_headerless_rows(rows, input_order_start)
+        if _looks_like_headered_score_file(header):
+            return _parse_headered_rows(header, reader, input_order_start)
+        return _parse_headerless_rows(_prepend_row(header, reader), input_order_start)
 
 
-def _parse_headerless_rows(rows: list[list[str]], input_order_start: int) -> tuple[list[_ParsedRow], int, int]:
+def _prepend_row(first_row: list[str], rows: Iterable[list[str]]) -> Iterable[list[str]]:
+    yield first_row
+    yield from rows
+
+
+def _parse_headerless_rows(rows: Iterable[list[str]], input_order_start: int) -> tuple[list[_ParsedRow], int, int]:
     parsed: list[_ParsedRow] = []
+    input_rows = 0
     skipped = 0
     for row_number, row in enumerate(rows):
+        input_rows += 1
         input_order = input_order_start + row_number
         if len(row) < 4:
             skipped += 1
@@ -135,15 +148,16 @@ def _parse_headerless_rows(rows: list[list[str]], input_order_start: int) -> tup
             skipped += 1
             continue
         parsed.append(parsed_row)
-    return parsed, len(rows), skipped
+    return parsed, input_rows, skipped
 
 
 def _parse_headered_rows(
     header: list[str],
-    rows: list[list[str]],
+    rows: Iterable[list[str]],
     input_order_start: int,
 ) -> tuple[list[_ParsedRow], int, int]:
     parsed: list[_ParsedRow] = []
+    input_rows = 0
     skipped = 0
 
     thumb_index = _find_column(header, THUMBNAIL_COLUMNS)
@@ -152,6 +166,7 @@ def _parse_headered_rows(
     datetime_index = _find_column(header, DATETIME_COLUMNS)
 
     for row_number, row in enumerate(rows):
+        input_rows += 1
         input_order = input_order_start + row_number
         path_value = _get_cell(row, path_index)
         thumbnail_value = _get_cell(row, thumb_index) or path_value
@@ -166,7 +181,7 @@ def _parse_headered_rows(
             skipped += 1
             continue
         parsed.append(parsed_row)
-    return parsed, len(rows), skipped
+    return parsed, input_rows, skipped
 
 
 def _looks_like_headered_score_file(header: Iterable[str]) -> bool:
@@ -207,6 +222,7 @@ def _build_row(
 
 
 def _rows_to_frame(rows: list[_ParsedRow]) -> pd.DataFrame:
+    pd = _pandas()
     if not rows:
         return pd.DataFrame(
             columns=[
@@ -270,10 +286,8 @@ def _normalize_one_thumbnail(value: object) -> str:
     cleaned = _clean_text(value)
     if cleaned == "":
         return ""
-    normalized = normalize_thumbnames(pd.Series([cleaned])).iloc[0]
-    if pd.isna(normalized):
-        return ""
-    return _strip_thumbnail_extension(str(normalized))
+    normalized = cleaned.replace("\\", "/").rsplit("/", maxsplit=1)[-1]
+    return _strip_thumbnail_extension(normalized)
 
 
 def _strip_thumbnail_extension(value: str) -> str:
@@ -292,17 +306,17 @@ def _parse_score(value: object) -> float | None:
         return None
 
 
-def _parse_datetime(value: object) -> tuple[Optional[pd.Timestamp], str, bool, bool]:
+def _parse_datetime(value: object) -> tuple[Optional[datetime], str, bool, bool]:
     text = _clean_text(value)
     if text == "":
         return None, "", False, False
 
-    parsed = pd.to_datetime(text, errors="coerce")
-    if pd.isna(parsed):
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
         return None, "", True, True
 
-    timestamp = pd.Timestamp(parsed)
-    return timestamp, timestamp.isoformat(sep=" "), True, False
+    return parsed, parsed.isoformat(sep=" "), True, False
 
 
 def _clean_text(value: object) -> str:
@@ -312,3 +326,57 @@ def _clean_text(value: object) -> str:
     if text.lower() in FALSE_STRINGS:
         return ""
     return text
+
+
+def _pandas():
+    import pandas as pd
+
+    return pd
+
+
+def _progress_enabled(setting: str, stream: object) -> bool:
+    if setting == "always":
+        return True
+    if setting == "never":
+        return False
+    return bool(getattr(stream, "isatty", lambda: False)())
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Consolidate recursive score CSVs to the latest score per thumbnail basename."
+    )
+    parser.add_argument(
+        "directory",
+        nargs="?",
+        type=Path,
+        default=Path("."),
+        help="Directory to search recursively for CSV files. Defaults to the current directory.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output CSV path. Defaults to consolidated_scores.csv in the input directory.",
+    )
+    parser.add_argument(
+        "--progress",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="Show consolidation progress on stderr. Defaults to auto in interactive terminals.",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    show_progress = _progress_enabled(args.progress, sys.stderr)
+    progress = (lambda text: print(text, file=sys.stderr, flush=True)) if show_progress else None
+    result = consolidate_score_directory(args.directory, args.output, progress)
+    print(json.dumps(result.summary, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

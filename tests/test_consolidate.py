@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pandas as pd
 
@@ -127,3 +130,23 @@ def test_consolidate_scores_cli_writes_default_output(tmp_path, capsys) -> None:
     assert summary["parsed_rows"] == 1
     assert summary["unique_basenames"] == 1
     assert summary["output_path"] == str(output_path)
+
+
+def test_consolidate_script_runs_directly_from_working_directory(tmp_path) -> None:
+    script_path = Path(__file__).resolve().parents[1] / "src" / "citsci_analysis" / "consolidate.py"
+    input_path = tmp_path / "scores.csv"
+    input_path.write_text("2026-05-01 00:00:00,0,/tmp/direct_thumb.png,1\n")
+
+    completed = subprocess.run(
+        [sys.executable, str(script_path), "--progress", "never"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    output_path = tmp_path / "consolidated_scores.csv"
+    assert output_path.exists()
+    summary = json.loads(completed.stdout)
+    assert summary["output_path"] == "consolidated_scores.csv"
+    assert summary["unique_basenames"] == 1

@@ -120,6 +120,12 @@ PYTHONPATH=src python3 -m citsci_analysis consolidate-scores \
   "/path/to/score_csv_directory"
 ```
 
+The same utility can be run directly from a working folder:
+
+```bash
+python /path/to/CitSciAnalysis/src/citsci_analysis/consolidate.py --progress always
+```
+
 This writes `consolidated_scores.csv` in the input directory by default, with
 one row per thumbnail basename sorted by name. Use `--output` to choose a
 different CSV path. The output columns are:
