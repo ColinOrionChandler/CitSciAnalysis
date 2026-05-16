@@ -61,11 +61,17 @@ PYTHONPATH=src python3 -m citsci_analysis score \
 
 This writes:
 
-- `output_total_<label>.csv`: every normalized `thumbname`, `score`, and
-  thumbnail-summary columns.
+- `output_total_<label>.csv`: every normalized `thumbname`, `score`,
+  `coc_score`, and thumbnail-summary columns.
 - `output_<label>.csv`: only rows at or above the cutoff, default `0.473`, with
-  the same thumbnail-summary columns.
+  the same score, `coc_score`, and thumbnail-summary columns.
 - `user_weights_<label>.csv`: volunteer weight diagnostics.
+
+By default, the classic scorer adds a `coc_score` column from the local COC
+sidecar file at
+`/Users/colinchandler/Dropbox/School/Research/Thumbnail Examination UI/consolidated_scores.csv`
+when that file is present. Use `--coc-scores /path/to/consolidated_scores.csv`
+to require a specific file, or `--no-coc-scores` to leave `coc_score` blank.
 
 The classic `output` and `output_total` files recreate the Zooniverse Toolz
 `thumbnail_summary.csv` fields locally: number of classifications, yes/no

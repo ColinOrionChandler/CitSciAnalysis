@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from citsci_analysis.cli import main
 from citsci_analysis.scoring import (
@@ -209,7 +210,7 @@ def test_write_and_compare_score_outputs_average_duplicate_reference(tmp_path) -
         }
     )
     result = score_classifications(frame, ScoringConfig())
-    paths = write_score_outputs(result, tmp_path / "out", "candidate", cutoff=0.5)
+    paths = write_score_outputs(result, tmp_path / "out", "candidate", cutoff=0.5, coc_scores_path=None)
     reference_path = tmp_path / "reference.csv"
     diff_path = tmp_path / "diff.csv"
     pd.DataFrame(
@@ -229,6 +230,82 @@ def test_write_and_compare_score_outputs_average_duplicate_reference(tmp_path) -
     assert diff_path.exists()
     assert total.columns.tolist() == SCORE_OUTPUT_COLUMNS
     assert filtered.columns.tolist() == SCORE_OUTPUT_COLUMNS
+
+
+@pytest.mark.parametrize(
+    ("coc_text", "expected"),
+    [
+        ("thumbnail_basename,score\nactive.png,8.0\nquiet.png,2.0\ncoc_only.png,9.0\n", 8.0),
+        ("thumbname,score\nactive.png,7.0\nquiet.png,2.0\ncoc_only.png,9.0\n", 7.0),
+        ("path,score\n/tmp/active.png,6.0\n/tmp/quiet.png,2.0\n/tmp/coc_only.png,9.0\n", 6.0),
+    ],
+)
+def test_write_score_outputs_adds_coc_score_to_total_and_filtered(tmp_path, coc_text: str, expected: float) -> None:
+    frame = pd.DataFrame(
+        {
+            "row_order": [0, 1],
+            "classification_id": [1, 2],
+            "user_key": ["u1", "u2"],
+            "user_name": ["u1", "u2"],
+            "thumbname": ["active", "quiet"],
+            "answer": [1.0, 0.0],
+            "train": [False, False],
+            "batch": [1, 1],
+            "started_at": pd.NaT,
+            "finished_at": pd.NaT,
+        }
+    )
+    coc_path = tmp_path / "coc_scores.csv"
+    coc_path.write_text(coc_text)
+
+    result = score_classifications(frame, ScoringConfig(score_all_same_shortcut=True))
+    paths = write_score_outputs(
+        result,
+        tmp_path / "out",
+        "coc",
+        cutoff=0.5,
+        coc_scores_path=coc_path,
+        require_coc_scores=True,
+    )
+    total = pd.read_csv(paths["total"])
+    filtered = pd.read_csv(paths["filtered"])
+
+    assert total.columns.tolist() == SCORE_OUTPUT_COLUMNS
+    assert filtered.columns.tolist() == SCORE_OUTPUT_COLUMNS
+    assert total["thumbname"].tolist() == ["active", "quiet"]
+    assert "coc_only" not in set(total["thumbname"])
+    assert total.set_index("thumbname").loc["active", "coc_score"] == expected
+    assert total.set_index("thumbname").loc["quiet", "coc_score"] == 2.0
+    assert filtered["thumbname"].tolist() == ["active"]
+    assert filtered.loc[0, "coc_score"] == expected
+    assert result.diagnostics["coc_scores_status"] == "loaded"
+    assert result.diagnostics["coc_matched_rows"] == 2
+
+
+def test_write_score_outputs_keeps_last_duplicate_coc_score(tmp_path) -> None:
+    frame = pd.DataFrame(
+        {
+            "row_order": [0],
+            "classification_id": [1],
+            "user_key": ["u1"],
+            "user_name": ["u1"],
+            "thumbname": ["dupe"],
+            "answer": [1.0],
+            "train": [False],
+            "batch": [1],
+            "started_at": pd.NaT,
+            "finished_at": pd.NaT,
+        }
+    )
+    coc_path = tmp_path / "coc_scores.csv"
+    coc_path.write_text("thumbnail_basename,score\ndupe.png,1\ndupe.png,4\n")
+
+    result = score_classifications(frame, ScoringConfig())
+    paths = write_score_outputs(result, tmp_path / "out", "dupe", 0.5, coc_scores_path=coc_path)
+    total = pd.read_csv(paths["total"])
+
+    assert total.loc[0, "coc_score"] == 4.0
+    assert result.diagnostics["coc_duplicate_rows_removed"] == 1
 
 
 def test_cli_scores_active_asteroids_csv_with_progress(tmp_path, capsys) -> None:
@@ -258,6 +335,7 @@ def test_cli_scores_active_asteroids_csv_with_progress(tmp_path, capsys) -> None
             "naive",
             "--progress",
             "always",
+            "--no-coc-scores",
         ]
     )
 
@@ -265,13 +343,72 @@ def test_cli_scores_active_asteroids_csv_with_progress(tmp_path, capsys) -> None
     captured = capsys.readouterr()
     assert "Loading input table..." in captured.err
     assert '"diagnostics"' in captured.out
-    total = pd.read_csv(output_dir / "output_total_active.csv")
-    filtered = pd.read_csv(output_dir / "output_active.csv")
+    total = pd.read_csv(output_dir / "output_total_active.csv", keep_default_na=False)
+    filtered = pd.read_csv(output_dir / "output_active.csv", keep_default_na=False)
     assert total.columns.tolist() == SCORE_OUTPUT_COLUMNS
     assert filtered.columns.tolist() == SCORE_OUTPUT_COLUMNS
+    assert total.set_index("thumbname").loc["active", "coc_score"] == ""
     assert total.set_index("thumbname").loc["active", "number_of_yes_answers"] == 1
     assert total.set_index("thumbname").loc["active", "class"] == "object-active"
     assert (output_dir / "user_weights_active.csv").exists()
+
+
+def test_cli_scores_active_asteroids_with_explicit_coc_scores(tmp_path, capsys) -> None:
+    input_path = tmp_path / "classifications.csv"
+    output_dir = tmp_path / "results"
+    coc_path = tmp_path / "coc_scores.csv"
+    pd.DataFrame(
+        {
+            "classification_id": [1, 2],
+            "username": ["u1", "u2"],
+            "thumbname": ["active.png", "quiet.png"],
+            "value": ["yes", "no"],
+            "train": [None, None],
+        }
+    ).to_csv(input_path, index=False)
+    coc_path.write_text("thumbnail_basename,score\nactive.png,5\n")
+
+    status = main(
+        [
+            "score",
+            str(input_path),
+            "--output-dir",
+            str(output_dir),
+            "--label",
+            "active",
+            "--mode",
+            "naive",
+            "--all-same-shortcut",
+            "--coc-scores",
+            str(coc_path),
+        ]
+    )
+
+    assert status == 0
+    captured = capsys.readouterr()
+    assert '"coc_scores_status": "loaded"' in captured.out
+    total = pd.read_csv(output_dir / "output_total_active.csv")
+    filtered = pd.read_csv(output_dir / "output_active.csv")
+    assert total.set_index("thumbname").loc["active", "coc_score"] == 5.0
+    assert pd.isna(total.set_index("thumbname").loc["quiet", "coc_score"])
+    assert filtered.loc[0, "thumbname"] == "active"
+    assert filtered.loc[0, "coc_score"] == 5.0
+
+
+def test_cli_explicit_missing_coc_scores_path_is_an_error(tmp_path) -> None:
+    input_path = tmp_path / "classifications.csv"
+    pd.DataFrame(
+        {
+            "classification_id": [1],
+            "username": ["u1"],
+            "thumbname": ["active.png"],
+            "value": ["yes"],
+            "train": [None],
+        }
+    ).to_csv(input_path, index=False)
+
+    with pytest.raises(FileNotFoundError):
+        main(["score", str(input_path), "--coc-scores", str(tmp_path / "missing.csv")])
 
 
 def test_cli_compare_and_inspect_inputs(tmp_path, capsys) -> None:

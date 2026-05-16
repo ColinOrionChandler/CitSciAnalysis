@@ -10,6 +10,7 @@ from typing import Any, Sequence, TextIO
 from .consolidate import consolidate_score_directory
 from .scoring import (
     DEFAULT_CUTOFF,
+    DEFAULT_COC_SCORES_PATH,
     ScoringConfig,
     compare_score_files,
     inspect_inputs,
@@ -214,6 +215,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional pickle/CSV with thumb_name and Problematic Yes/No columns.",
     )
+    coc_group = score.add_mutually_exclusive_group()
+    coc_group.add_argument(
+        "--coc-scores",
+        type=Path,
+        default=None,
+        help=f"COC score CSV to join as coc_score. Defaults to {DEFAULT_COC_SCORES_PATH} when present.",
+    )
+    coc_group.add_argument(
+        "--no-coc-scores",
+        action="store_true",
+        help="Disable COC score enrichment and leave coc_score blank.",
+    )
 
     compare = subparsers.add_parser("compare", help="Compare two output_total score files.")
     compare.add_argument("reference", type=Path)
@@ -321,7 +334,15 @@ def run_score(args: argparse.Namespace) -> int:
     result = score_classifications(frame, config)
     scored = time.perf_counter()
     _progress_message(show_progress, progress_stream, "Writing score outputs...")
-    paths = write_score_outputs(result, args.output_dir, args.label, args.cutoff)
+    coc_scores_path = None if args.no_coc_scores else args.coc_scores or DEFAULT_COC_SCORES_PATH
+    paths = write_score_outputs(
+        result,
+        args.output_dir,
+        args.label,
+        args.cutoff,
+        coc_scores_path=coc_scores_path,
+        require_coc_scores=args.coc_scores is not None,
+    )
     written = time.perf_counter()
     result.diagnostics.update(
         {

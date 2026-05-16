@@ -2,6 +2,7 @@
 
 from .consolidate import ConsolidationResult, consolidate_score_directory, discover_score_csvs
 from .scoring import (
+    DEFAULT_COC_SCORES_PATH,
     ScoringConfig,
     compare_score_files,
     inspect_inputs,
@@ -13,6 +14,7 @@ from .rubin import RubinScoringConfig, score_rubin_chunks, score_rubin_file, wri
 
 __all__ = [
     "ConsolidationResult",
+    "DEFAULT_COC_SCORES_PATH",
     "RubinScoringConfig",
     "ScoringConfig",
     "compare_score_files",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import pickle
 import warnings
+from collections.abc import MutableMapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -16,6 +17,9 @@ from numpy.polynomial import Polynomial
 DEFAULT_WEIGHTS = (7.0, 2.0, 1.0)
 DEFAULT_CUTOFF = 0.473
 DEFAULT_MAX_USER_CLASSIFICATIONS = 10_000
+DEFAULT_COC_SCORES_PATH = Path(
+    "/Users/colinchandler/Dropbox/School/Research/Thumbnail Examination UI/consolidated_scores.csv"
+)
 
 TRUE_STRINGS = {"1", "1.0", "true", "t", "yes", "y"}
 FALSE_STRINGS = {"", "0", "0.0", "false", "f", "no", "n", "none", "nan", "null", "na", "n/a", "<na>"}
@@ -43,7 +47,10 @@ THUMBNAIL_SUMMARY_COLUMNS = [
     "class",
 ]
 
-SCORE_OUTPUT_COLUMNS = ["thumbname", "score", *THUMBNAIL_SUMMARY_COLUMNS]
+SCORE_OUTPUT_COLUMNS = ["thumbname", "score", "coc_score", *THUMBNAIL_SUMMARY_COLUMNS]
+COC_THUMBNAIL_COLUMNS = ("thumbnail_basename", "thumbname", "thumb_name", "ThumbName", "thumbnail", "filename")
+COC_PATH_COLUMNS = ("path", "filepath", "file_path", "image_path")
+COC_SCORE_COLUMNS = ("score", "Confidence", "confidence")
 
 PARQUET_COLUMNS = [
     "classification_id",
@@ -567,7 +574,110 @@ def default_label(today: Optional[date] = None) -> str:
     return f"{day.year}_{day.month}_{day.day}"
 
 
-def write_score_outputs(result: ScoreResult, output_dir: str | Path, label: Optional[str], cutoff: float) -> Mapping[str, Path]:
+def enrich_scores_with_coc(
+    scores: pd.DataFrame,
+    coc_scores_path: str | Path | None = DEFAULT_COC_SCORES_PATH,
+    *,
+    require_coc_scores: bool = False,
+) -> tuple[pd.DataFrame, dict[str, int | str]]:
+    """Left-join COC sidecar scores onto generated thumbnail scores."""
+
+    output = scores.copy()
+    if coc_scores_path is None:
+        output["coc_score"] = pd.NA
+        return output, _empty_coc_diagnostics("disabled", "", len(output))
+
+    coc_path = Path(coc_scores_path)
+    if not coc_path.is_file():
+        if require_coc_scores:
+            raise FileNotFoundError(f"COC score file not found: {coc_path}")
+        output["coc_score"] = pd.NA
+        return output, _empty_coc_diagnostics("missing_default", str(coc_path), len(output))
+
+    coc_scores, diagnostics = load_coc_scores(coc_path)
+    output = output.drop(columns=["coc_score"], errors="ignore").merge(coc_scores, on="thumbname", how="left")
+    matched = int(output["coc_score"].notna().sum()) if "coc_score" in output.columns else 0
+    diagnostics.update(
+        {
+            "coc_scores_status": "loaded",
+            "coc_scores_path": str(coc_path),
+            "coc_matched_rows": matched,
+            "coc_missing_rows": int(len(output) - matched),
+        }
+    )
+    return output, diagnostics
+
+
+def load_coc_scores(path: str | Path) -> tuple[pd.DataFrame, dict[str, int | str]]:
+    """Load COC scores keyed by normalized thumbnail basename."""
+
+    input_path = Path(path)
+    frame = pd.read_csv(input_path, low_memory=False)
+    score_column = _find_input_column(frame.columns, COC_SCORE_COLUMNS)
+    if score_column is None:
+        raise ValueError(f"No score column found in COC score file: {input_path}")
+
+    key_source = coalesce_present_columns(frame, COC_THUMBNAIL_COLUMNS)
+    path_source = coalesce_present_columns(frame, COC_PATH_COLUMNS)
+    key_source = key_source.combine_first(path_source)
+
+    work = pd.DataFrame(
+        {
+            "thumbname": normalize_thumbnames(key_source),
+            "coc_score": pd.to_numeric(frame[score_column], errors="coerce"),
+            "_coc_order": np.arange(len(frame), dtype="int64"),
+        }
+    )
+    parsed = work.dropna(subset=["thumbname", "coc_score"]).copy()
+    parsed = parsed.loc[parsed["thumbname"].astype("string").str.len() > 0]
+    deduped = parsed.sort_values("_coc_order", kind="mergesort").drop_duplicates("thumbname", keep="last")
+
+    diagnostics: dict[str, int | str] = {
+        "coc_input_rows": int(len(frame)),
+        "coc_parsed_rows": int(len(parsed)),
+        "coc_skipped_rows": int(len(frame) - len(parsed)),
+        "coc_unique_thumbnails": int(deduped["thumbname"].nunique()) if not deduped.empty else 0,
+        "coc_duplicate_rows_removed": int(len(parsed) - len(deduped)),
+    }
+    return deduped[["thumbname", "coc_score"]].reset_index(drop=True), diagnostics
+
+
+def _empty_coc_diagnostics(status: str, path: str, missing_rows: int) -> dict[str, int | str]:
+    return {
+        "coc_scores_status": status,
+        "coc_scores_path": path,
+        "coc_input_rows": 0,
+        "coc_parsed_rows": 0,
+        "coc_skipped_rows": 0,
+        "coc_unique_thumbnails": 0,
+        "coc_duplicate_rows_removed": 0,
+        "coc_matched_rows": 0,
+        "coc_missing_rows": missing_rows,
+    }
+
+
+def _find_input_column(columns: Iterable[str], candidates: Iterable[str]) -> str | None:
+    normalized = {_column_key(column): column for column in columns}
+    for candidate in candidates:
+        column = normalized.get(_column_key(candidate))
+        if column is not None:
+            return column
+    return None
+
+
+def _column_key(value: object) -> str:
+    return "".join(str(value).strip().lower().split()).replace("_", "")
+
+
+def write_score_outputs(
+    result: ScoreResult,
+    output_dir: str | Path,
+    label: Optional[str],
+    cutoff: float,
+    coc_scores_path: str | Path | None = DEFAULT_COC_SCORES_PATH,
+    *,
+    require_coc_scores: bool = False,
+) -> Mapping[str, Path]:
     """Write full, cutoff-filtered, and volunteer-weight CSV outputs."""
 
     outdir = Path(output_dir)
@@ -577,7 +687,15 @@ def write_score_outputs(result: ScoreResult, output_dir: str | Path, label: Opti
     filtered_path = outdir / f"output_{output_label}.csv"
     weights_path = outdir / f"user_weights_{output_label}.csv"
 
-    output = result.scores.reindex(columns=SCORE_OUTPUT_COLUMNS).copy()
+    output, coc_diagnostics = enrich_scores_with_coc(
+        result.scores,
+        coc_scores_path,
+        require_coc_scores=require_coc_scores,
+    )
+    if isinstance(result.diagnostics, MutableMapping):
+        result.diagnostics.update(coc_diagnostics)
+
+    output = output.reindex(columns=SCORE_OUTPUT_COLUMNS).copy()
     output.to_csv(total_path, index=False)
     output.loc[output["score"] >= cutoff].to_csv(filtered_path, index=False)
     result.user_weights.to_csv(weights_path, index=False)
