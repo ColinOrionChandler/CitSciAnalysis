@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any, Sequence, TextIO
 
+from .consolidate import consolidate_score_directory
 from .scoring import (
     DEFAULT_CUTOFF,
     ScoringConfig,
@@ -223,7 +224,35 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("old_csv", type=Path)
     inspect.add_argument("new_parquet", type=Path)
 
+    consolidate = subparsers.add_parser(
+        "consolidate-scores",
+        help="Consolidate recursive score CSVs to the latest score per thumbnail basename.",
+    )
+    consolidate.add_argument("directory", type=Path, help="Directory to search recursively for CSV files.")
+    consolidate.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output CSV path. Defaults to consolidated_scores.csv in the input directory.",
+    )
+    consolidate.add_argument(
+        "--progress",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="Show consolidation progress on stderr. Defaults to auto in interactive terminals.",
+    )
+
     return parser
+
+
+def run_consolidate_scores(args: argparse.Namespace) -> int:
+    progress_stream = sys.stderr
+    show_progress = _progress_enabled(args.progress, progress_stream)
+    progress = (lambda text: _progress_message(True, progress_stream, text)) if show_progress else None
+
+    result = consolidate_score_directory(args.directory, args.output, progress)
+    _print_json(result.summary)
+    return 0
 
 
 def run_score(args: argparse.Namespace) -> int:
@@ -318,6 +347,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "inspect-inputs":
         _print_json(inspect_inputs(args.old_csv, args.new_parquet))
         return 0
+    if args.command == "consolidate-scores":
+        return run_consolidate_scores(args)
     parser.error(f"Unhandled command: {args.command}")
     return 2
 

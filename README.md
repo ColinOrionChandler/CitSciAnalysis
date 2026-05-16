@@ -112,6 +112,30 @@ PYTHONPATH=src python3 -m citsci_analysis inspect-inputs \
   "/path/to/reparsed_z/cleaned_classifications.parquet"
 ```
 
+Consolidate recursive score CSVs from current headerless exports and older
+`ThumbName`/`Confidence` tables:
+
+```bash
+PYTHONPATH=src python3 -m citsci_analysis consolidate-scores \
+  "/path/to/score_csv_directory"
+```
+
+This writes `consolidated_scores.csv` in the input directory by default, with
+one row per thumbnail basename sorted by name. Use `--output` to choose a
+different CSV path. The output columns are:
+
+- `datetime`: parsed datetime when valid, blank for missing or malformed dates.
+- `path`: original image path when the source file provided one.
+- `thumbnail_basename`: image basename with the final thumbnail extension
+  removed.
+- `score`: numeric score or legacy `Confidence` value.
+
+When duplicate basenames appear, dated rows beat undated or malformed-date rows,
+and the newest valid datetime wins. If all duplicate rows are undated, the
+deterministic last row by sorted input path and row number is kept. The output
+file is skipped during recursive discovery so rerunning the command does not
+ingest its previous result.
+
 ## Development Checks
 
 Run the test suite from an environment with the project dependencies installed:
