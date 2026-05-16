@@ -5,6 +5,7 @@ import pandas as pd
 
 from citsci_analysis.cli import main
 from citsci_analysis.scoring import (
+    SCORE_OUTPUT_COLUMNS,
     ScoringConfig,
     calculate_metric_weight,
     compare_score_files,
@@ -81,6 +82,25 @@ def test_load_classifications_normalizes_csv_columns_and_user_fallbacks(tmp_path
     assert normalized["answer"].iloc[:2].tolist() == [1.0, 0.0]
     assert np.isnan(normalized["answer"].iloc[2])
     assert normalized["train"].tolist() == [True, False, False]
+    assert normalized["class"].isna().all()
+
+
+def test_load_classifications_preserves_class_column(tmp_path) -> None:
+    input_path = tmp_path / "classifications.csv"
+    pd.DataFrame(
+        {
+            "classification_id": [1, 2],
+            "username": ["alice", "bob"],
+            "thumbname": ["active.png", "quiet.png"],
+            "value": ["yes", "no"],
+            "class": ["object-a", ""],
+        }
+    ).to_csv(input_path, index=False)
+
+    normalized = load_classifications(input_path)
+
+    assert normalized["class"].iloc[0] == "object-a"
+    assert pd.isna(normalized["class"].iloc[1])
 
 
 def test_load_problematic_training_thumbs_accepts_csv_variants(tmp_path) -> None:
@@ -119,6 +139,35 @@ def test_score_classifications_respects_vote_cap_and_all_same_shortcut() -> None
 
     assert target["vote_count"] == 2
     assert target["score"] == 1.0
+
+
+def test_score_classifications_adds_raw_thumbnail_summary_columns() -> None:
+    frame = pd.DataFrame(
+        {
+            "row_order": range(4),
+            "classification_id": range(4),
+            "user_key": ["u1", "u1", "u2", "u3"],
+            "user_name": ["u1", "u1", "u2", "u3"],
+            "thumbname": ["target", "target", "target", "target"],
+            "answer": [1.0, 0.0, np.nan, 1.0],
+            "train": [False, False, False, False],
+            "class": ["object-a", "object-a", "object-a", "object-a"],
+            "batch": [1, 1, 1, 1],
+            "started_at": pd.NaT,
+            "finished_at": pd.NaT,
+        }
+    )
+
+    result = score_classifications(frame, ScoringConfig(dedupe_user_thumbnail=True))
+    target = result.scores.set_index("thumbname").loc["target"]
+
+    assert target["vote_count"] == 2
+    assert target["number_of_times_classified"] == 4
+    assert target["number_of_yes_answers"] == 2
+    assert target["number_of_no_answers"] == 1
+    assert np.isclose(target["fraction_yes"], 2 / 3)
+    assert target["train"] is False or target["train"] == np.False_
+    assert target["class"] == "object-a"
 
 
 def test_time_and_legacy_modes_return_row_weights() -> None:
@@ -171,11 +220,15 @@ def test_write_and_compare_score_outputs_average_duplicate_reference(tmp_path) -
     ).to_csv(reference_path, index=False)
 
     report = compare_score_files(reference_path, paths["total"], diff_path)
+    total = pd.read_csv(paths["total"])
+    filtered = pd.read_csv(paths["filtered"])
 
     assert report["reference_rows"] == 3
     assert report["reference_duplicate_rows"] == 2
     assert report["matched_thumbnails"] == 2
     assert diff_path.exists()
+    assert total.columns.tolist() == SCORE_OUTPUT_COLUMNS
+    assert filtered.columns.tolist() == SCORE_OUTPUT_COLUMNS
 
 
 def test_cli_scores_active_asteroids_csv_with_progress(tmp_path, capsys) -> None:
@@ -188,6 +241,7 @@ def test_cli_scores_active_asteroids_csv_with_progress(tmp_path, capsys) -> None
             "thumbname": ["active.png", "quiet.png"],
             "value": ["yes", "no"],
             "train": [None, None],
+            "class": ["object-active", "object-quiet"],
             "batch": [1, 1],
         }
     ).to_csv(input_path, index=False)
@@ -211,7 +265,12 @@ def test_cli_scores_active_asteroids_csv_with_progress(tmp_path, capsys) -> None
     captured = capsys.readouterr()
     assert "Loading input table..." in captured.err
     assert '"diagnostics"' in captured.out
-    assert (output_dir / "output_total_active.csv").exists()
+    total = pd.read_csv(output_dir / "output_total_active.csv")
+    filtered = pd.read_csv(output_dir / "output_active.csv")
+    assert total.columns.tolist() == SCORE_OUTPUT_COLUMNS
+    assert filtered.columns.tolist() == SCORE_OUTPUT_COLUMNS
+    assert total.set_index("thumbname").loc["active", "number_of_yes_answers"] == 1
+    assert total.set_index("thumbname").loc["active", "class"] == "object-active"
     assert (output_dir / "user_weights_active.csv").exists()
 
 

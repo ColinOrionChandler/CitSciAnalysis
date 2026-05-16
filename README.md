@@ -61,9 +61,17 @@ PYTHONPATH=src python3 -m citsci_analysis score \
 
 This writes:
 
-- `output_total_<label>.csv`: every normalized `thumbname` and `score`.
-- `output_<label>.csv`: only rows at or above the cutoff, default `0.473`.
+- `output_total_<label>.csv`: every normalized `thumbname`, `score`, and
+  thumbnail-summary columns.
+- `output_<label>.csv`: only rows at or above the cutoff, default `0.473`, with
+  the same thumbnail-summary columns.
 - `user_weights_<label>.csv`: volunteer weight diagnostics.
+
+The classic `output` and `output_total` files recreate the Zooniverse Toolz
+`thumbnail_summary.csv` fields locally: number of classifications, yes/no
+counts, fraction yes, training flag, and class. These summary columns are based
+on the raw normalized rows before score-time vote filters or duplicate-user
+deduping are applied.
 
 Score Rubin Comet Catchers data with chunked, object-level aggregation:
 

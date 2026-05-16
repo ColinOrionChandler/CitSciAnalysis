@@ -28,10 +28,22 @@ NORMALIZED_COLUMNS = [
     "thumbname",
     "answer",
     "train",
+    "class",
     "batch",
     "started_at",
     "finished_at",
 ]
+
+THUMBNAIL_SUMMARY_COLUMNS = [
+    "number_of_times_classified",
+    "number_of_yes_answers",
+    "number_of_no_answers",
+    "fraction_yes",
+    "train",
+    "class",
+]
+
+SCORE_OUTPUT_COLUMNS = ["thumbname", "score", *THUMBNAIL_SUMMARY_COLUMNS]
 
 PARQUET_COLUMNS = [
     "classification_id",
@@ -44,6 +56,7 @@ PARQUET_COLUMNS = [
     "filename",
     "answer",
     "train",
+    "class",
     "batch",
 ]
 
@@ -60,6 +73,7 @@ CSV_COLUMNS = [
     "value",
     "answer",
     "train",
+    "class",
     "batch",
 ]
 
@@ -172,6 +186,14 @@ def normalize_bool(values: pd.Series, *, default: bool = False) -> pd.Series:
     return result
 
 
+def normalize_optional_text(values: pd.Series) -> pd.Series:
+    """Normalize optional text metadata while preserving meaningful values."""
+
+    text = values.astype("string").str.strip()
+    missing_strings = {"", "none", "nan", "null", "<na>"}
+    return text.mask(text.str.lower().isin(missing_strings))
+
+
 def _normalize_identifier_values(values: pd.Series) -> pd.Series:
     """Stringify IDs while avoiding CSV-inferred integer values like ``42.0``."""
 
@@ -215,6 +237,7 @@ def load_classifications(path: str | Path) -> pd.DataFrame:
             "thumbname": normalize_thumbnames(thumb_source),
             "answer": normalize_answers(raw),
             "train": normalize_bool(first_present_column(raw, ["train"]), default=False),
+            "class": normalize_optional_text(first_present_column(raw, ["class"])),
             "batch": pd.to_numeric(first_present_column(raw, ["batch"]), errors="coerce"),
             "started_at": pd.to_datetime(first_present_column(raw, ["started_at"]), errors="coerce", utc=True),
             "finished_at": pd.to_datetime(first_present_column(raw, ["finished_at"]), errors="coerce", utc=True),
@@ -223,6 +246,7 @@ def load_classifications(path: str | Path) -> pd.DataFrame:
     normalized["user_key"] = normalized["user_key"].astype("string")
     normalized["user_name"] = normalized["user_name"].astype("string")
     normalized["thumbname"] = normalized["thumbname"].astype("string")
+    normalized["class"] = normalized["class"].astype("string")
     return normalized[NORMALIZED_COLUMNS]
 
 
@@ -426,10 +450,52 @@ def _first_non_null(values: pd.Series) -> object:
     return non_null.iloc[0]
 
 
+def summarize_thumbnails(frame: pd.DataFrame) -> pd.DataFrame:
+    """Build Zooniverse Toolz-style summary columns from raw normalized rows.
+
+    These counts intentionally run before score-time vote caps and user/thumb
+    deduping so the output CSVs match ``thumbnail_summary.csv`` semantics.
+    """
+
+    columns = ["thumbname", *THUMBNAIL_SUMMARY_COLUMNS]
+    if frame.empty or "thumbname" not in frame.columns:
+        return pd.DataFrame(columns=columns)
+
+    thumbs = frame.dropna(subset=["thumbname"]).copy()
+    if thumbs.empty:
+        return pd.DataFrame(columns=columns)
+
+    if "train" not in thumbs.columns:
+        thumbs["train"] = False
+    if "class" not in thumbs.columns:
+        thumbs["class"] = pd.NA
+
+    thumbs["_yes"] = thumbs["answer"].eq(1.0).astype("int64")
+    thumbs["_no"] = thumbs["answer"].eq(0.0).astype("int64")
+    grouped = thumbs.groupby("thumbname", sort=False, dropna=False).agg(
+        **{
+            "number_of_times_classified": ("thumbname", "size"),
+            "number_of_yes_answers": ("_yes", "sum"),
+            "number_of_no_answers": ("_no", "sum"),
+            "train": ("train", _first_non_null),
+            "class": ("class", _first_non_null),
+        }
+    )
+    total_answers = grouped["number_of_yes_answers"] + grouped["number_of_no_answers"]
+    grouped["fraction_yes"] = np.where(
+        total_answers > 0,
+        grouped["number_of_yes_answers"] / total_answers,
+        np.nan,
+    )
+    grouped = grouped.reset_index()
+    return grouped[columns]
+
+
 def score_classifications(frame: pd.DataFrame, config: ScoringConfig) -> ScoreResult:
     """Score each thumbnail in a normalized classification dataframe."""
 
     work = _ensure_user_index(frame)
+    thumbnail_summary = summarize_thumbnails(work)
     row_weights, user_weights = row_weights_for_mode(work, config)
     user_counts = work.groupby("user_key", sort=False, dropna=False).size()
 
@@ -479,7 +545,8 @@ def score_classifications(frame: pd.DataFrame, config: ScoringConfig) -> ScoreRe
     scores["score"] = scores["score"].fillna(0.0).astype("float64")
     scores["vote_count"] = scores["vote_count"].fillna(0).astype("int64")
     scores["batch"] = scores["batch_scored"].combine_first(scores["batch"])
-    scores = scores[["thumbname", "score", "vote_count", "batch"]]
+    scores = scores.merge(thumbnail_summary, on="thumbname", how="left")
+    scores = scores[["thumbname", "score", "vote_count", "batch", *THUMBNAIL_SUMMARY_COLUMNS]]
 
     diagnostics = {
         "mode": config.mode,
@@ -510,7 +577,7 @@ def write_score_outputs(result: ScoreResult, output_dir: str | Path, label: Opti
     filtered_path = outdir / f"output_{output_label}.csv"
     weights_path = outdir / f"user_weights_{output_label}.csv"
 
-    output = result.scores[["thumbname", "score"]].copy()
+    output = result.scores.reindex(columns=SCORE_OUTPUT_COLUMNS).copy()
     output.to_csv(total_path, index=False)
     output.loc[output["score"] >= cutoff].to_csv(filtered_path, index=False)
     result.user_weights.to_csv(weights_path, index=False)
