@@ -325,25 +325,23 @@ def _update_registry(registry: dict[str, dict[str, object]], chunk: pd.DataFrame
     if candidates.empty:
         return
 
-    grouped = candidates.groupby("review_unit_id", sort=False, dropna=False).agg(
-        object_id=("object_id", _first_non_null),
-        subject_id=("subject_id", _first_non_null),
-        batch=("batch", _first_non_null),
-    )
-    for review_unit_id, row in grouped.iterrows():
+    # first() selects each column's first non-null value, just like the
+    # previous Python reducer, without three Python calls per review unit.
+    columns = ("object_id", "subject_id", "batch")
+    grouped = candidates.groupby("review_unit_id", sort=False, dropna=False)[list(columns)].first()
+    for review_unit_id, object_id, subject_id, batch in grouped.itertuples(name=None):
         key = str(review_unit_id)
+        values = (object_id, subject_id, batch)
         if key not in registry:
             registry[key] = {
                 "review_unit_id": key,
-                "object_id": row["object_id"],
-                "subject_id": row["subject_id"],
-                "batch": row["batch"],
+                **dict(zip(columns, values)),
             }
             continue
         current = registry[key]
-        for column in ("object_id", "subject_id", "batch"):
-            if pd.isna(current.get(column)) and pd.notna(row[column]):
-                current[column] = row[column]
+        for column, value in zip(columns, values):
+            if pd.isna(current.get(column)) and pd.notna(value):
+                current[column] = value
 
 
 def _add_series_counts(target: dict[str, int], counts: pd.Series) -> None:

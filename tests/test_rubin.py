@@ -4,7 +4,27 @@ import numpy as np
 import pandas as pd
 
 from citsci_analysis.cli import main
-from citsci_analysis.rubin import RubinScoringConfig, score_rubin_chunks
+from citsci_analysis.rubin import RubinScoringConfig, score_rubin_chunks, _update_registry
+
+
+def test_registry_fills_columns_independently_and_preserves_first_values() -> None:
+    registry = {}
+    _update_registry(registry, pd.DataFrame({
+        "review_unit_id": ["a", "a", "b", None],
+        "object_id": [None, "object-a", None, "ignored"],
+        "subject_id": ["subject-a", None, "subject-b", "ignored"],
+        "batch": [None, 2, None, 99],
+    }))
+    _update_registry(registry, pd.DataFrame({
+        "review_unit_id": ["a", "b"],
+        "object_id": ["conflicting-object", "object-b"],
+        "subject_id": ["conflicting-subject", None],
+        "batch": [3, 4],
+    }))
+    assert registry == {
+        "a": {"review_unit_id": "a", "object_id": "object-a", "subject_id": "subject-a", "batch": 2},
+        "b": {"review_unit_id": "b", "object_id": "object-b", "subject_id": "subject-b", "batch": 4},
+    }
 
 
 def _rubin_frame() -> pd.DataFrame:
