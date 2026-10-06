@@ -529,14 +529,15 @@ def score_classifications(frame: pd.DataFrame, config: ScoringConfig) -> ScoreRe
         yes_count=("answer", "sum"),
         batch=("batch", _first_non_null),
     )
-    grouped["score"] = 0.0
     denominator = grouped["denominator"].to_numpy(dtype="float64")
+    score = np.zeros(len(grouped), dtype="float64")
     np.divide(
         grouped["numerator"].to_numpy(dtype="float64"),
         denominator,
-        out=grouped["score"].to_numpy(dtype="float64"),
+        out=score,
         where=denominator != 0,
     )
+    grouped["score"] = score
 
     if config.score_all_same_shortcut:
         grouped.loc[grouped["yes_count"] == grouped["vote_count"], "score"] = 1.0

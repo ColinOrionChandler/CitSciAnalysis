@@ -623,14 +623,15 @@ def _score_review_units(
 
     for column in ("numerator", "denominator", "vote_count", "yes_count"):
         review_units[column] = review_units[column].fillna(0)
-    review_units["score"] = 0.0
     denominator = review_units["denominator"].to_numpy(dtype="float64")
+    score = np.zeros(len(review_units), dtype="float64")
     np.divide(
         review_units["numerator"].to_numpy(dtype="float64"),
         denominator,
-        out=review_units["score"].to_numpy(dtype="float64"),
+        out=score,
         where=denominator != 0,
     )
+    review_units["score"] = score
     review_units["vote_count"] = review_units["vote_count"].astype("int64")
     review_units["yes_count"] = review_units["yes_count"].astype("int64")
     review_units["weight_sum"] = review_units["denominator"].astype("float64")
