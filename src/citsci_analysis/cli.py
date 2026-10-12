@@ -163,6 +163,61 @@ def _progress_message(enabled: bool, stream: TextIO, text: str) -> None:
         print(text, file=stream, flush=True)
 
 
+def add_workset_options(parser: argparse.ArgumentParser, *, standalone: bool = False) -> None:
+    parser.add_argument("--workset-root", type=Path, help="Shared candidate workset destination; defaults to mounted Dropbox when available.")
+    parser.add_argument("--source-root", type=Path, action="append", default=None, help="Repeatable image source folder (RCC sources are read only).")
+    parser.add_argument("--source-index", type=Path, action="append", default=None, help="Repeatable AA archive CSV/Parquet index.")
+    parser.add_argument("--data-root", type=Path, default=None, help="Mounted data root for relative archive paths.")
+    parser.add_argument("--training-metadata", type=Path, help="Thumbnail summary or normalized classifications with explicit training flags.")
+    parser.add_argument("--training-null-is-nontraining", action="store_true", help="Explicitly apply the Zooniverse nullable training convention; unknown nonempty values remain unresolved.")
+    parser.add_argument("--context", type=int, default=None, help="AA cutouts on each side of every qualifying image (default: 3).")
+    parser.add_argument("--remote", help="AA SSH archive host; defaults to the configured Arnor source.")
+    parser.add_argument("--remote-path-map", action="append", default=[], metavar="OLD=NEW", help="Repeatable explicit remapping of stale remote index path prefixes.")
+    parser.add_argument("--remote-index", help="AA remote PNG index path.")
+    parser.add_argument("--no-remote", action="store_true", help="Use local archive inventories only.")
+    parser.add_argument("--migrate-legacy", action="store_true", help="Journal and move verified legacy root PNGs into object folders.")
+    parser.add_argument("--inventory-timeout", type=int, default=600, help="Maximum seconds for the filtered AA remote index query.")
+    parser.add_argument("--transfer-timeout", type=int, default=600, help="Maximum total seconds across resumable transfer batches.")
+    parser.add_argument("--transfer-batch-size", type=int, default=512, help="Maximum AA paths per transfer batch (default 512).")
+    if standalone:
+        parser.add_argument("--preview", action="store_true", help="Read-only selection and inventory preview; no image transfers or output writes.")
+    else:
+        parser.add_argument("--no-workset", action="store_true", help="Disable the default-on candidate workset stage.")
+
+
+def run_workset(args: argparse.Namespace, scores: Path, project: str, training: Path | None = None) -> dict:
+    from .worksets import WorksetConfig, default_destination, default_sources, prepare_workset
+    destination = args.workset_root or default_destination()
+    if destination is None:
+        destination = getattr(args, "output_dir", scores.parent) / "candidate_worksets"
+    roots, indexes = default_sources(destination)
+    if project == "rcc":
+        roots, indexes = (), ()
+    options = dict(project=project, scores=scores, destination=destination,
+                   training=args.training_metadata or training,
+                   source_roots=tuple(args.source_root) if args.source_root is not None else roots,
+                   source_indexes=tuple(args.source_index) if args.source_index is not None else indexes,
+                   cutoff=args.cutoff, context=args.context, label=args.label or "workset",
+                   preview=getattr(args, "preview", False), migrate=args.migrate_legacy,
+                   progress=_progress_enabled(getattr(args, "progress", "always"), sys.stderr),
+                   inventory_timeout=args.inventory_timeout, transfer_timeout=args.transfer_timeout, transfer_batch_size=args.transfer_batch_size, training_null_is_nontraining=args.training_null_is_nontraining)
+    if args.data_root is not None:
+        options["data_root"] = args.data_root
+    if args.no_remote:
+        options["remote"] = None
+    elif args.remote:
+        options["remote"] = args.remote
+    if args.remote_index:
+        options["remote_index"] = args.remote_index
+    mappings = []
+    for value in args.remote_path_map:
+        if "=" not in value:
+            raise ValueError("Remote path mapping requires OLD=NEW")
+        mappings.append(tuple(value.split("=", 1)))
+    options["remote_path_maps"] = tuple(mappings)
+    return prepare_workset(WorksetConfig(**options))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Score citizen-science Zooniverse classifications.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -227,6 +282,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable COC score enrichment and leave coc_score blank.",
     )
+
+    add_workset_options(score)
+    workset = subparsers.add_parser("prepare-workset", help="Prepare or preview candidates from an existing full score CSV.")
+    workset.add_argument("scores", type=Path)
+    workset.add_argument("--project", required=True, choices=["aa", "rcc"])
+    workset.add_argument("--cutoff", type=float, default=DEFAULT_CUTOFF)
+    workset.add_argument("--label", default="workset")
+    add_workset_options(workset, standalone=True)
 
     compare = subparsers.add_parser("compare", help="Compare two output_total score files.")
     compare.add_argument("reference", type=Path)
@@ -324,7 +387,9 @@ def run_score(args: argparse.Namespace) -> int:
                 "total_seconds": round(written - start, 3),
             }
         )
-        _print_json({"diagnostics": result.diagnostics, "outputs": paths})
+        workset = None if args.no_workset else run_workset(args, paths["review_units"], "rcc", args.input)
+        result.diagnostics.update(workset_seconds=round(time.perf_counter() - written, 3), total_seconds=round(time.perf_counter() - start, 3))
+        _print_json({"diagnostics": result.diagnostics, "outputs": paths, "workset": workset})
         return 0
 
     _progress_message(show_progress, progress_stream, "Loading input table...")
@@ -352,7 +417,9 @@ def run_score(args: argparse.Namespace) -> int:
             "total_seconds": round(written - start, 3),
         }
     )
-    _print_json({"diagnostics": result.diagnostics, "outputs": paths})
+    workset = None if args.no_workset else run_workset(args, paths["total"], "aa", args.input)
+    result.diagnostics.update(workset_seconds=round(time.perf_counter() - written, 3), total_seconds=round(time.perf_counter() - start, 3))
+    _print_json({"diagnostics": result.diagnostics, "outputs": paths, "workset": workset})
     return 0
 
 
@@ -360,6 +427,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.command == "prepare-workset":
+        training = args.scores.parent.parent / "reparsed_z/cleaned_classifications.parquet"
+        if args.project == "aa" or not training.is_file():
+            training = args.scores.parent.parent / "reparsed_z/thumbnail_summary.csv"
+        _print_json(run_workset(args, args.scores, args.project, training if training.is_file() else None))
+        return 0
     if args.command == "score":
         return run_score(args)
     if args.command == "compare":

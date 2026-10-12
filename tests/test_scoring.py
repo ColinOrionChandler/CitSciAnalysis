@@ -325,7 +325,7 @@ def test_cli_scores_active_asteroids_csv_with_progress(tmp_path, capsys) -> None
 
     status = main(
         [
-            "score",
+            "score", "--no-workset",
             str(input_path),
             "--output-dir",
             str(output_dir),
@@ -370,7 +370,7 @@ def test_cli_scores_active_asteroids_with_explicit_coc_scores(tmp_path, capsys) 
 
     status = main(
         [
-            "score",
+            "score", "--no-workset",
             str(input_path),
             "--output-dir",
             str(output_dir),
@@ -408,7 +408,7 @@ def test_cli_explicit_missing_coc_scores_path_is_an_error(tmp_path) -> None:
     ).to_csv(input_path, index=False)
 
     with pytest.raises(FileNotFoundError):
-        main(["score", str(input_path), "--coc-scores", str(tmp_path / "missing.csv")])
+        main(["score", "--no-workset", str(input_path), "--coc-scores", str(tmp_path / "missing.csv")])
 
 
 def test_cli_compare_and_inspect_inputs(tmp_path, capsys) -> None:

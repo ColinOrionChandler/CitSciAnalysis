@@ -198,3 +198,121 @@ Score comparison to historic `output_total_2025_1_13.csv.gz`, after normalizing
 The historic total output has 765,352 rows but only 765,175 unique normalized
 thumbnail names, so the comparison utility averages duplicate historic rows by
 thumbnail before computing metrics.
+
+## Candidate review worksets
+
+`score` now runs an optional candidate-workset stage after writing the original
+score files. Disable it with `--no-workset`. The scoring functions and existing
+CSV schemas are unchanged. Worksets go to `--workset-root`, then
+`CITSCI_WORKSET_ROOT`, then an existing mounted Dropbox `all_interesting`
+directory; without those destinations they go to `candidate_worksets` beside
+local outputs. Dataset paths and CSVs are runtime inputs, not repository assets.
+
+Prepare or preview existing scores without repeating scoring:
+
+```sh
+citsci-score prepare-workset /path/to/output_total.csv --project aa \
+  --workset-root /path/to/all_interesting --label aa_export \
+  --training-metadata /path/to/cleaned_classifications.parquet --preview
+
+citsci-score prepare-workset /path/to/rubin_review_unit_scores.csv --project rcc \
+  --workset-root /path/to/all_interesting --label rcc_export \
+  --training-metadata /path/to/cleaned_classifications.parquet \
+  --source-root /path/to/existing/rcc
+```
+
+Remove `--preview` to execute. `--source-root` and `--source-index` are repeatable;
+`--data-root` maps relative AA archive index paths to mounted storage. CSV and
+Parquet indexes provide `basename` and `relative_path` columns; paths are relative
+to that data root. AA defaults
+use the existing candidate folders and mounted SAFARI2 manifests when available.
+The Arnor index is queried for selected objects before selecting neighbors.
+Its default path mapping follows the verified SAFARI2 relocation from `/epyc`
+to `/astro/store/epyc3`; explicit mappings override that default.
+Use `--remote-path-map /old/archive=/current/archive` when a verified archive
+relocation has made index prefixes stale; the mapping is recorded in the workset.
+`--remote` and `--remote-index` override that source; `--no-remote` explicitly
+selects a local-only inventory. RCC never downloads or copies images.
+
+AA selects non-training images at `--cutoff` (default 0.473), and includes
+`--context` cutouts on either side (default 3) from the archive, merging overlaps.
+RCC selects by the top-three mean of non-training review-unit scores, or the mean
+of all available units for objects with fewer than three. Its default 0.473 is
+inherited from the scorer and is **not a calibrated RCC threshold**. Missing or
+conflicting training metadata is reported and excluded. A dedicated
+`training_subject` flag identifies negative as well as positive training controls.
+For an export known to use the Zooniverse nullable convention, explicitly supply
+`--training-null-is-nontraining`; this treats blank `train` values as non-training
+when no dedicated flag exists. Unknown nonempty values still remain unresolved.
+The selected convention is recorded in the workset fingerprint.
+
+Each `<project>/worksets/<label>-<fingerprint>/` contains `objects.csv`,
+`images.csv`, `reveal_scores.csv`, `issues.json`, `inventory.json`, and
+`workset.json` (contract v1). Source score/training paths and a checksum of the
+selected source inventory are recorded for reproducibility.
+AA publishes ordinary `.png` images only, never FITS or `.png.gz` review products.
+Compressed PNG sources are decompressed and validated before publication; small
+CSV/JSON sidecars remain necessary for scores and queue loading.
+AA PNGs live once at `aa/objects/<object_id>/<logical_filename>.png`.
+AA selection groups processing variants by object ID and observation datetime
+before counting the ±3 neighbors. An unambiguous DECam source exposure datetime
+is preferred because historical filename times can describe the start or midpoint
+of the same exposure. Otherwise selection uses the filename's existing 10-second
+precision; it does not round to a minute or merge distinct known exposures.
+Each group prefers `pI`, then `p2`, then other products. Ties prefer a qualifying
+target, then the lexical filename. Target membership survives a variant change,
+but image scores remain attached to their original filenames: an unscored `pI`
+has blank image scores even when selected by a qualifying `p2`. Object scores
+remain unchanged. The saved inventory records omitted variants and their sources.
+Image IDs retain the existing filename-based contract for classification compatibility.
+The deduplication policy participates in AA fingerprints, so regeneration creates
+a new workset and preserves existing frozen manifests and source PNGs.
+The Python helper `narrow_aa_workset(path, context=3)` derives a smaller workset
+from a complete saved AA selection without rescoring, querying archives, copying
+images, or modifying its parent. Existing derived worksets retain their progress.
+Legacy worksets must be regenerated before narrowing because duplicate variants
+may have consumed their context slots; deleting duplicate rows alone cannot restore
+the missing distinct neighbors.
+Explicit `--context 10` remains supported; RCC defaults and fingerprints are unchanged.
+Reveal CSVs distinguish image `cs_score`, native-scale `coc_score`, and
+`object_cs_score`. Unclassified context has blank image scores. RCC uses supplied
+source roots and records unresolved images without manufacturing local paths.
+
+Fingerprints include score/training content and selection/source settings.
+A successfully inventoried AA selection and its checked source inventory are frozen
+on retry, avoiding another full archive scan. RCC rechecks its configured folders
+for newly arrived images while retaining exact membership. Each retry validates
+existing images, copies only missing content, and updates receipts atomically. Verified
+transfer staging copies are removed after publication, leaving one shared PNG;
+conflicts and incomplete transfers remain preserved for diagnosis or retry.
+Use a different label to request a fresh selection after archive changes.
+`--transfer-batch-size` limits each AA batch to 512 paths by default, so a large
+selection starts transferring before all archive paths have been checked. Each
+batch has a space preflight. `--transfer-timeout` bounds total preflight and
+transfer time across batches (600 seconds by default). Timed-out command groups are terminated
+with their SSH children. `--inventory-timeout` separately bounds the index query.
+A failed archive query cannot select substitute local neighbors:
+only target images can be prepared until inventory succeeds. Check `summary.status`
+and `issues.json`; a partial workset is not a completion certificate.
+
+`--migrate-legacy` inventories top-level legacy PNGs in `migration/legacy.json`,
+then moves verified images into object folders. Empty, invalid, conflicting, and
+preexisting duplicate files remain preserved and reported. When an archive copy
+recovers an empty or invalid legacy file, the journal records
+`recovered_original_preserved` with the shared PNG checksum and original path.
+No images are deleted
+or silently overwritten. A per-project destination lock prevents concurrent writers; after
+an ungraceful termination, verify that its writer is stopped before removing the
+`.workset-<project>.lock` directory.
+
+Open a delivered workset in the updated astro-stampede checkout:
+
+```sh
+astro-stampede --workset /path/to/workset.json --validate
+astro-stampede --workset /path/to/workset.json
+```
+
+Validation accepts metadata-only worksets and reports unmatched image counts.
+Review sessions require usable matched images. Scores remain hidden until Reveal.
+Existing label stores must be selected explicitly through astro-stampede's storage
+options; workset preparation never modifies classification state.

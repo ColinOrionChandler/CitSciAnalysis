@@ -117,7 +117,7 @@ def test_rubin_cli_writes_rubin_outputs(tmp_path) -> None:
 
     status = main(
         [
-            "score",
+            "score", "--no-workset",
             str(input_path),
             "--output-dir",
             str(output_dir),
@@ -150,7 +150,7 @@ def test_rubin_cli_progress_reports_chunk_passes(tmp_path, capsys) -> None:
 
     status = main(
         [
-            "score",
+            "score", "--no-workset",
             str(input_path),
             "--output-dir",
             str(output_dir),
