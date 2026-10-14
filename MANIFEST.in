@@ -1,0 +1,9 @@
+prune results
+prune historic_code
+prune .github
+prune benchmarks/env
+prune benchmarks/_results
+prune benchmarks/_html
+prune docs/_build
+prune docs/autoapi
+global-exclude .DS_Store *.pyc

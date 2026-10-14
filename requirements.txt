@@ -1,4 +1,2 @@
-numpy>=1.26
-pandas>=2.2
-pyarrow>=15
-tqdm>=4.66
+# Compatibility installer; runtime dependencies are defined in pyproject.toml.
+-e .

@@ -1,0 +1,68 @@
+name: Benchmarks
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '15 7 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - run: python -m pip install 'asv==0.6.5' virtualenv build
+      - name: Restore published benchmark history
+        if: github.event_name != 'pull_request'
+        run: |
+          if git ls-remote --exit-code --heads origin benchmarks; then
+            git fetch origin benchmarks
+            git archive FETCH_HEAD _results | tar -x -C benchmarks
+          fi
+      - name: Benchmark current revision
+        working-directory: benchmarks
+        run: |
+          asv machine --machine github-linux --yes
+          asv run HEAD^! --show-stderr
+          asv publish
+      - name: Compare PR base and head
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        working-directory: benchmarks
+        run: |
+          asv run "$BASE_SHA^!" --show-stderr
+          asv compare "$BASE_SHA" "$(git rev-parse HEAD)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks
+          path: |
+            benchmarks/_results
+            benchmarks/_html
+      - name: Save history
+        if: github.event_name != 'pull_request'
+        uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445
+        with:
+          branch: benchmarks
+          folder: benchmarks/_results
+          target-folder: _results
+      - name: Publish dashboard
+        if: github.event_name != 'pull_request'
+        uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445
+        with:
+          branch: gh-pages
+          folder: benchmarks/_html
