@@ -96,3 +96,52 @@ def test_installed_consolidation_runs_directly(tmp_path: Path) -> None:
     )
     assert json.loads(result.stdout)["output_path"]
     assert "target" in (tmp_path / "consolidated_scores.csv").read_text()
+
+
+def test_unbuilt_source_tree_entry_paths(tmp_path: Path) -> None:
+    """A clean Git archive can run without generated versions or an editable install."""
+    import tarfile
+
+    checkout = Path(__file__).resolve().parents[1]
+    if not (checkout / ".git").exists():
+        pytest.skip("Source checkout check requires Git metadata")
+    archive_path = tmp_path / "source.tar"
+    subprocess.run(["git", "archive", "HEAD", "-o", str(archive_path)], cwd=checkout, check=True)
+    source = tmp_path / "source"
+    source.mkdir()
+    with tarfile.open(archive_path) as archive:
+        archive.extractall(source, filter="data")
+    env = dict(os.environ, PYTHONPATH=str(source / "src"))
+    version = subprocess.run(
+        [sys.executable, "-c", "import citsci_analysis as c; print(c.__version__); print(c.__file__)"],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.splitlines()
+    assert version == ["0.0.0+unknown", str(source / "src/citsci_analysis/__init__.py")]
+    subprocess.run(
+        [sys.executable, "-m", "citsci_analysis", "--help"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        check=True,
+    )
+    scores = tmp_path / "source_scores"
+    scores.mkdir()
+    (scores / "input.csv").write_text("ThumbName,Confidence\ntarget.png,0.75\n")
+    subprocess.run(
+        [
+            sys.executable,
+            str(source / "src/citsci_analysis/consolidate.py"),
+            str(scores),
+            "--progress",
+            "never",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        check=True,
+    )
+    assert "target" in (scores / "consolidated_scores.csv").read_text()

@@ -96,3 +96,51 @@ inspected with all six runtime/peak-memory measurements for the migration baseli
 Results are retained on the `benchmarks` branch; generated HTML is served from
 `gh-pages`. Timing comparisons remain advisory. Read the Docs, Codecov, and PyPI
 account activation remain pending as described above.
+
+## Final audit (2026-10-14)
+
+The merged migration at `2c3189a` was reviewed against the full plan. The audit
+found validation/reporting gaps and corrected them without changing scientific
+implementation or historical code:
+
+- The release version check inspected an editable install instead of the archives.
+  `tools/validate_distributions.py` now checks the actual wheel and sdist, including
+  matching versions, release tag, BSD license/attribution, package entry files,
+  and `py.typed`. It rejects unsafe paths, research-data payloads, and excluded
+  result/history directories. Negative tests exercise these guards. Future release
+  runs also install both artifacts outside the checkout and rebuild the sdist.
+- The original 90-row parity fixture did not repeat user/thumbnail pairs. The
+  committed `tools/check_scientific_parity.py` uses 182 rows with 91 repeated pairs,
+  runs against archived pre-migration commit `cd96e14`, and compares 75 output
+  files. All modes, CSV/Parquet, deduplication on/off, COC duplicates, independent
+  missing metadata, and chunk sizes 1, 11, and 64 are covered. It is required in
+  the Packaging job and uses the same installed dependencies for both revisions.
+- The Rubin benchmark now has 2,000 actual duplicate pairs across chunk boundaries.
+  ASV versions its changed setup separately; original records are retained, while
+  corrected scoring measurements start a new series. PR reports are rendered
+  after both revisions run, the comparison appears in the Actions summary, and
+  failed runs retain available artifacts with an explicit failure summary.
+- Source-tree execution is now checked automatically from a clean Git archive,
+  including fallback version metadata, the module CLI, and direct consolidation.
+  Published metadata also declares the supported Python versions and typed status.
+- The PR checklist now references the actual developer guide and scientific
+  contracts; bug reports request synthetic examples. Strict mypy includes the
+  new validation tools (18 checked Python files).
+
+| Plan area | Audit evidence/status |
+| --- | --- |
+| Template and history | Answers match the separately generated v2.3.0 template; original Git history and `historic_code/` are preserved. |
+| Scientific/API compatibility | Original tests and installed API/CLI checks pass; the expanded before/after comparison passes for all 75 files. |
+| Packaging and release preparation | Wheel and sdist pass archive checks and Twine; installed-package and unbuilt-source checks pass. Release upload remains restricted to published, valid version-tagged releases on main history. |
+| Quality and coverage | Ruff and strict mypy pass; measured coverage remains 86.38%, above the unchanged 86.24% baseline floor. |
+| Documentation | Sphinx builds with warnings as errors; existing scientific explanations and historical benchmark results remain included. |
+| CI and public repository | Python 3.11–3.14/Linux, 3.12/macOS, lowest direct dependencies, daily smoke schedule, and ten required PR checks are retained. No extra approving reviewer is required. |
+| Benchmark hosting | Public Pages dashboard and retained results were verified; corrected PR and main workflows must pass before rollout is considered verified. |
+| Deferred accounts | Read the Docs import, Codecov activation, and PyPI publisher registration remain pending by owner instruction; none is represented as operational. |
+| Release restraint | No version tag, GitHub release, or package upload was created. |
+
+To repeat the scientific audit, run `python tools/check_scientific_parity.py` from a
+Git checkout with full history and installed runtime dependencies. For distribution
+validation, build into a clean directory and run
+`python tools/validate_distributions.py dist`; pass `--release-tag vX.Y.Z` when
+checking a future release. These commands never upload artifacts.

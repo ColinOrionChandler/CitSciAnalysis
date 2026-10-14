@@ -55,12 +55,12 @@ repos:
     rev: 2834ec6639549dd6796205c8f011dedcd587288b
     hooks:
       - id: mypy
-        name: mypy (python files in src/ and tests/)
+        name: mypy (source, tests, benchmarks, and validation tools)
         entry: mypy
         pass_filenames: false
         language: system
         types: [python]
-        files: ^(src|tests|benchmarks)/
+        files: ^(src|tests|benchmarks|tools)/
         args:
           [
             "--strict", # Use mypy strict mode to enforce type hints

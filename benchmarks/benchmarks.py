@@ -38,7 +38,10 @@ class Scoring:
         self.raw = self.frame.rename(columns={"user_key": "unused"}).copy()
         self.raw["review_unit_id"] = self.raw["thumbname"]
         self.raw["object_id"] = "object" + pd.Series(np.arange(len(self.raw)) % 20).astype(str)
+        # Repeat votes after the original chunks so streaming deduplication is exercised.
+        self.raw = pd.concat([self.raw, self.raw.iloc[:2000]], ignore_index=True)
         self.chunks = [self.raw.iloc[start : start + 2000].copy() for start in range(0, len(self.raw), 2000)]
+        assert self.raw.duplicated(["user_name", "review_unit_id"]).sum() == 2000
 
     def time_classic(self) -> None:
         """Time static-weight classic scoring."""

@@ -38,7 +38,6 @@ jobs:
         run: |
           asv machine --machine github-linux --yes
           asv run HEAD^! --show-stderr
-          asv publish
       - name: Compare PR base and head
         if: github.event_name == 'pull_request'
         env:
@@ -46,13 +45,22 @@ jobs:
         working-directory: benchmarks
         run: |
           asv run "$BASE_SHA^!" --show-stderr
-          asv compare "$BASE_SHA" "$(git rev-parse HEAD)"
+          asv compare "$BASE_SHA" "$(git rev-parse HEAD)" | tee comparison.txt
+          { echo '### Advisory benchmark comparison'; echo '```text'; cat comparison.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Render benchmark report
+        working-directory: benchmarks
+        run: asv publish
+      - name: Report benchmark execution failure
+        if: failure()
+        run: echo 'Benchmark execution or publication failed. Inspect the failed step and retained artifacts; no performance conclusion is available.' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: benchmarks
           path: |
             benchmarks/_results
             benchmarks/_html
+            benchmarks/comparison.txt
       - name: Save history
         if: github.event_name != 'pull_request'
         uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445
