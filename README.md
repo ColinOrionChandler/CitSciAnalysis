@@ -43,10 +43,10 @@ The default metric weights are the historic `7, 2, 1`.
 
 ## Usage
 
-Install the dependencies in your environment:
+Use Python 3.11–3.14. Install the package in an isolated environment:
 
 ```bash
-python3 -m pip install -r requirements.txt
+python3 -m pip install .
 ```
 
 Score the cleaned Parquet with the faster static-weight mode:
@@ -158,7 +158,8 @@ ingest its previous result.
 
 ## Development Checks
 
-Run the test suite from an environment with the project dependencies installed:
+Install developer tools with `python3 -m pip install -e ".[dev]"` and follow
+[DEVELOPMENT_GUIDE.md](https://github.com/ColinOrionChandler/CitSciAnalysis/blob/main/DEVELOPMENT_GUIDE.md). Run the test suite:
 
 ```bash
 PYTHONPATH=src python3 -m pytest
@@ -316,3 +317,10 @@ Validation accepts metadata-only worksets and reports unmatched image counts.
 Review sessions require usable matched images. Scores remain hidden until Reveal.
 Existing label stores must be selected explicitly through astro-stampede's storage
 options; workset preparation never modifies classification state.
+
+## Project infrastructure
+
+This project uses the [LINCC Frameworks Python Project Template](https://github.com/lincc-frameworks/python-project-template)
+v2.3.0 with BSD-3-Clause licensing. See [migration notes](https://github.com/ColinOrionChandler/CitSciAnalysis/blob/main/docs/migration.md) for
+Copier updates, service activation status, and validation evidence. Versions come
+from Git tags; no PyPI release is created by this migration.

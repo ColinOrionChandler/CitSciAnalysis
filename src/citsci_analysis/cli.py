@@ -4,13 +4,15 @@ import argparse
 import json
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence, TextIO
+from typing import Any, TextIO
 
 from .consolidate import consolidate_score_directory
+from .rubin import RubinProgressEvent, RubinScoringConfig, score_rubin_file, write_rubin_outputs
 from .scoring import (
-    DEFAULT_CUTOFF,
     DEFAULT_COC_SCORES_PATH,
+    DEFAULT_CUTOFF,
     ScoringConfig,
     compare_score_files,
     inspect_inputs,
@@ -19,7 +21,6 @@ from .scoring import (
     score_classifications,
     write_score_outputs,
 )
-from .rubin import RubinProgressEvent, RubinScoringConfig, score_rubin_file, write_rubin_outputs
 
 
 def _print_json(payload: object) -> None:
@@ -164,43 +165,125 @@ def _progress_message(enabled: bool, stream: TextIO, text: str) -> None:
 
 
 def add_workset_options(parser: argparse.ArgumentParser, *, standalone: bool = False) -> None:
-    parser.add_argument("--workset-root", type=Path, help="Shared candidate workset destination; defaults to mounted Dropbox when available.")
-    parser.add_argument("--source-root", type=Path, action="append", default=None, help="Repeatable image source folder (RCC sources are read only).")
-    parser.add_argument("--source-index", type=Path, action="append", default=None, help="Repeatable AA archive CSV/Parquet index.")
-    parser.add_argument("--data-root", type=Path, default=None, help="Mounted data root for relative archive paths.")
-    parser.add_argument("--training-metadata", type=Path, help="Thumbnail summary or normalized classifications with explicit training flags.")
-    parser.add_argument("--training-null-is-nontraining", action="store_true", help="Explicitly apply the Zooniverse nullable training convention; unknown nonempty values remain unresolved.")
-    parser.add_argument("--context", type=int, default=None, help="AA cutouts on each side of every qualifying image (default: 3).")
+    """Add shared source and workset options to an argument parser."""
+
+    parser.add_argument(
+        "--workset-root",
+        type=Path,
+        help="Shared candidate workset destination; defaults to mounted Dropbox when available.",
+    )
+    parser.add_argument(
+        "--source-root",
+        type=Path,
+        action="append",
+        default=None,
+        help="Repeatable image source folder (RCC sources are read only).",
+    )
+    parser.add_argument(
+        "--source-index",
+        type=Path,
+        action="append",
+        default=None,
+        help="Repeatable AA archive CSV/Parquet index.",
+    )
+    parser.add_argument(
+        "--data-root", type=Path, default=None, help="Mounted data root for relative archive paths."
+    )
+    parser.add_argument(
+        "--training-metadata",
+        type=Path,
+        help="Thumbnail summary or normalized classifications with explicit training flags.",
+    )
+    parser.add_argument(
+        "--training-null-is-nontraining",
+        action="store_true",
+        help=(
+            "Explicitly apply the Zooniverse nullable training convention; "
+            "unknown nonempty values remain unresolved."
+        ),
+    )
+    parser.add_argument(
+        "--context",
+        type=int,
+        default=None,
+        help="AA cutouts on each side of every qualifying image (default: 3).",
+    )
     parser.add_argument("--remote", help="AA SSH archive host; defaults to the configured Arnor source.")
-    parser.add_argument("--remote-path-map", action="append", default=[], metavar="OLD=NEW", help="Repeatable explicit remapping of stale remote index path prefixes.")
+    parser.add_argument(
+        "--remote-path-map",
+        action="append",
+        default=[],
+        metavar="OLD=NEW",
+        help="Repeatable explicit remapping of stale remote index path prefixes.",
+    )
     parser.add_argument("--remote-index", help="AA remote PNG index path.")
     parser.add_argument("--no-remote", action="store_true", help="Use local archive inventories only.")
-    parser.add_argument("--migrate-legacy", action="store_true", help="Journal and move verified legacy root PNGs into object folders.")
-    parser.add_argument("--inventory-timeout", type=int, default=600, help="Maximum seconds for the filtered AA remote index query.")
-    parser.add_argument("--transfer-timeout", type=int, default=600, help="Maximum total seconds across resumable transfer batches.")
-    parser.add_argument("--transfer-batch-size", type=int, default=512, help="Maximum AA paths per transfer batch (default 512).")
+    parser.add_argument(
+        "--migrate-legacy",
+        action="store_true",
+        help="Journal and move verified legacy root PNGs into object folders.",
+    )
+    parser.add_argument(
+        "--inventory-timeout",
+        type=int,
+        default=600,
+        help="Maximum seconds for the filtered AA remote index query.",
+    )
+    parser.add_argument(
+        "--transfer-timeout",
+        type=int,
+        default=600,
+        help="Maximum total seconds across resumable transfer batches.",
+    )
+    parser.add_argument(
+        "--transfer-batch-size",
+        type=int,
+        default=512,
+        help="Maximum AA paths per transfer batch (default 512).",
+    )
     if standalone:
-        parser.add_argument("--preview", action="store_true", help="Read-only selection and inventory preview; no image transfers or output writes.")
+        parser.add_argument(
+            "--preview",
+            action="store_true",
+            help="Read-only selection and inventory preview; no image transfers or output writes.",
+        )
     else:
-        parser.add_argument("--no-workset", action="store_true", help="Disable the default-on candidate workset stage.")
+        parser.add_argument(
+            "--no-workset", action="store_true", help="Disable the default-on candidate workset stage."
+        )
 
 
-def run_workset(args: argparse.Namespace, scores: Path, project: str, training: Path | None = None) -> dict:
+def run_workset(
+    args: argparse.Namespace, scores: Path, project: str, training: Path | None = None
+) -> dict[str, Any]:
+    """Prepare or preview a candidate workset using parsed CLI options."""
+
     from .worksets import WorksetConfig, default_destination, default_sources, prepare_workset
+
     destination = args.workset_root or default_destination()
     if destination is None:
         destination = getattr(args, "output_dir", scores.parent) / "candidate_worksets"
     roots, indexes = default_sources(destination)
     if project == "rcc":
         roots, indexes = (), ()
-    options = dict(project=project, scores=scores, destination=destination,
-                   training=args.training_metadata or training,
-                   source_roots=tuple(args.source_root) if args.source_root is not None else roots,
-                   source_indexes=tuple(args.source_index) if args.source_index is not None else indexes,
-                   cutoff=args.cutoff, context=args.context, label=args.label or "workset",
-                   preview=getattr(args, "preview", False), migrate=args.migrate_legacy,
-                   progress=_progress_enabled(getattr(args, "progress", "always"), sys.stderr),
-                   inventory_timeout=args.inventory_timeout, transfer_timeout=args.transfer_timeout, transfer_batch_size=args.transfer_batch_size, training_null_is_nontraining=args.training_null_is_nontraining)
+    options = dict(
+        project=project,
+        scores=scores,
+        destination=destination,
+        training=args.training_metadata or training,
+        source_roots=tuple(args.source_root) if args.source_root is not None else roots,
+        source_indexes=tuple(args.source_index) if args.source_index is not None else indexes,
+        cutoff=args.cutoff,
+        context=args.context,
+        label=args.label or "workset",
+        preview=getattr(args, "preview", False),
+        migrate=args.migrate_legacy,
+        progress=_progress_enabled(getattr(args, "progress", "always"), sys.stderr),
+        inventory_timeout=args.inventory_timeout,
+        transfer_timeout=args.transfer_timeout,
+        transfer_batch_size=args.transfer_batch_size,
+        training_null_is_nontraining=args.training_null_is_nontraining,
+    )
     if args.data_root is not None:
         options["data_root"] = args.data_root
     if args.no_remote:
@@ -219,13 +302,21 @@ def run_workset(args: argparse.Namespace, scores: Path, project: str, training: 
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line argument parser."""
+
     parser = argparse.ArgumentParser(description="Score citizen-science Zooniverse classifications.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    score = subparsers.add_parser("score", help="Score thumbnails/review units from CSV or cleaned Parquet classifications.")
-    score.add_argument("input", type=Path, help="Path to reparsed.csv(.gz) or cleaned_classifications.parquet.")
+    score = subparsers.add_parser(
+        "score", help="Score thumbnails/review units from CSV or cleaned Parquet classifications."
+    )
+    score.add_argument(
+        "input", type=Path, help="Path to reparsed.csv(.gz) or cleaned_classifications.parquet."
+    )
     score.add_argument("--output-dir", type=Path, default=Path("results"), help="Directory for output CSVs.")
-    score.add_argument("--label", default=None, help="Filename date/label, e.g. 2025_1_13. Defaults to today.")
+    score.add_argument(
+        "--label", default=None, help="Filename date/label, e.g. 2025_1_13. Defaults to today."
+    )
     score.add_argument("--mode", choices=["naive", "time", "legacy", "rubin"], default="naive")
     score.add_argument("--cutoff", type=float, default=DEFAULT_CUTOFF)
     score.add_argument("--weights", nargs=3, type=float, metavar=("A", "B", "C"), default=(7.0, 2.0, 1.0))
@@ -234,7 +325,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-user-classifications",
         type=int,
         default=None,
-        help="Minimum total classifications for a volunteer vote to count. Defaults to 4 for legacy, 1 otherwise.",
+        help=(
+            "Minimum total classifications for a volunteer vote to count. "
+            "Defaults to 4 for legacy, 1 otherwise."
+        ),
     )
     score.add_argument(
         "--max-votes-per-thumb",
@@ -284,7 +378,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     add_workset_options(score)
-    workset = subparsers.add_parser("prepare-workset", help="Prepare or preview candidates from an existing full score CSV.")
+    workset = subparsers.add_parser(
+        "prepare-workset", help="Prepare or preview candidates from an existing full score CSV."
+    )
     workset.add_argument("scores", type=Path)
     workset.add_argument("--project", required=True, choices=["aa", "rcc"])
     workset.add_argument("--cutoff", type=float, default=DEFAULT_CUTOFF)
@@ -294,9 +390,13 @@ def build_parser() -> argparse.ArgumentParser:
     compare = subparsers.add_parser("compare", help="Compare two output_total score files.")
     compare.add_argument("reference", type=Path)
     compare.add_argument("candidate", type=Path)
-    compare.add_argument("--diff-output", type=Path, default=None, help="Optional CSV with per-thumbnail differences.")
+    compare.add_argument(
+        "--diff-output", type=Path, default=None, help="Optional CSV with per-thumbnail differences."
+    )
 
-    inspect = subparsers.add_parser("inspect-inputs", help="Compare the old reparsed CSV and new cleaned Parquet inputs.")
+    inspect = subparsers.add_parser(
+        "inspect-inputs", help="Compare the old reparsed CSV and new cleaned Parquet inputs."
+    )
     inspect.add_argument("old_csv", type=Path)
     inspect.add_argument("new_parquet", type=Path)
 
@@ -322,6 +422,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_consolidate_scores(args: argparse.Namespace) -> int:
+    """Consolidate score CSVs and emit the command summary."""
+
     progress_stream = sys.stderr
     show_progress = _progress_enabled(args.progress, progress_stream)
     progress = (lambda text: _progress_message(True, progress_stream, text)) if show_progress else None
@@ -332,10 +434,12 @@ def run_consolidate_scores(args: argparse.Namespace) -> int:
 
 
 def run_score(args: argparse.Namespace) -> int:
+    """Score the requested inputs and optionally prepare a candidate workset."""
+
     progress_stream = sys.stderr
     show_progress = _progress_enabled(args.progress, progress_stream)
 
-    problematic = frozenset()
+    problematic: frozenset[str] = frozenset()
     if args.problematic_training is not None:
         _progress_message(show_progress, progress_stream, "Loading problematic training list...")
         problematic = load_problematic_training_thumbs(args.problematic_training)
@@ -362,7 +466,7 @@ def run_score(args: argparse.Namespace) -> int:
 
     start = time.perf_counter()
     if args.mode == "rubin":
-        config = RubinScoringConfig(
+        rubin_config = RubinScoringConfig(
             metric_weights=tuple(args.weights),
             max_user_classifications=args.max_user_classifications,
             min_user_classifications=min_user_classifications,
@@ -373,13 +477,13 @@ def run_score(args: argparse.Namespace) -> int:
         )
         progress = _RubinProgressPrinter(progress_stream) if show_progress else None
         loaded = time.perf_counter()
-        result = score_rubin_file(args.input, config, progress)
+        rubin_result = score_rubin_file(args.input, rubin_config, progress)
         scored = time.perf_counter()
         if progress is not None:
             progress.message("Writing Rubin outputs...")
-        paths = write_rubin_outputs(result, args.output_dir, args.label, args.cutoff)
+        paths = write_rubin_outputs(rubin_result, args.output_dir, args.label, args.cutoff)
         written = time.perf_counter()
-        result.diagnostics.update(
+        rubin_result.diagnostics.update(
             {
                 "load_seconds": round(loaded - start, 3),
                 "score_seconds": round(scored - loaded, 3),
@@ -388,8 +492,11 @@ def run_score(args: argparse.Namespace) -> int:
             }
         )
         workset = None if args.no_workset else run_workset(args, paths["review_units"], "rcc", args.input)
-        result.diagnostics.update(workset_seconds=round(time.perf_counter() - written, 3), total_seconds=round(time.perf_counter() - start, 3))
-        _print_json({"diagnostics": result.diagnostics, "outputs": paths, "workset": workset})
+        rubin_result.diagnostics.update(
+            workset_seconds=round(time.perf_counter() - written, 3),
+            total_seconds=round(time.perf_counter() - start, 3),
+        )
+        _print_json({"diagnostics": rubin_result.diagnostics, "outputs": paths, "workset": workset})
         return 0
 
     _progress_message(show_progress, progress_stream, "Loading input table...")
@@ -418,12 +525,17 @@ def run_score(args: argparse.Namespace) -> int:
         }
     )
     workset = None if args.no_workset else run_workset(args, paths["total"], "aa", args.input)
-    result.diagnostics.update(workset_seconds=round(time.perf_counter() - written, 3), total_seconds=round(time.perf_counter() - start, 3))
+    result.diagnostics.update(
+        workset_seconds=round(time.perf_counter() - written, 3),
+        total_seconds=round(time.perf_counter() - start, 3),
+    )
     _print_json({"diagnostics": result.diagnostics, "outputs": paths, "workset": workset})
     return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Parse arguments, run the command, and return its exit status."""
+
     parser = build_parser()
     args = parser.parse_args(argv)
 

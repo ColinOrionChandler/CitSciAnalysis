@@ -9,14 +9,14 @@ change the review-unit definition without changing the object ranking output.
 
 from __future__ import annotations
 
-import math
 import json
+import math
 import sqlite3
 import tempfile
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -34,7 +34,6 @@ from .scoring import (
     normalize_bool,
     normalize_thumbnames,
 )
-
 
 RUBIN_COLUMNS = [
     "classification_id",
@@ -71,8 +70,8 @@ class RubinScoringConfig:
     chunk_size: int = 100_000
     dedupe_user_review_units: bool = True
     top_k: int = 3
-    review_unit_column: Optional[str] = None
-    object_column: Optional[str] = None
+    review_unit_column: str | None = None
+    object_column: str | None = None
     problematic_training_review_units: frozenset[str] = frozenset()
 
 
@@ -83,7 +82,7 @@ class RubinScoreResult:
     review_unit_scores: pd.DataFrame
     object_scores: pd.DataFrame
     user_weights: pd.DataFrame
-    diagnostics: Mapping[str, float | int | str]
+    diagnostics: dict[str, float | int | str]
 
 
 @dataclass(frozen=True)
@@ -94,19 +93,19 @@ class RubinProgressEvent:
     phase: str
     rows: int = 0
     chunks: int = 0
-    total_rows: Optional[int] = None
+    total_rows: int | None = None
 
 
 ProgressCallback = Callable[[RubinProgressEvent], None]
 
 
 def _emit_progress(
-    progress: Optional[ProgressCallback],
+    progress: ProgressCallback | None,
     event: str,
     phase: str,
     rows: int = 0,
     chunks: int = 0,
-    total_rows: Optional[int] = None,
+    total_rows: int | None = None,
 ) -> None:
     if progress is not None:
         progress(RubinProgressEvent(event, phase, int(rows), int(chunks), total_rows))
@@ -116,7 +115,9 @@ def _existing_columns_for_parquet(path: Path, wanted: Iterable[str]) -> list[str
     try:
         import pyarrow.parquet as pq
     except ImportError as exc:
-        raise ImportError("Rubin Parquet scoring requires pyarrow. Install project requirements first.") from exc
+        raise ImportError(
+            "Rubin Parquet scoring requires pyarrow. Install project requirements first."
+        ) from exc
 
     available = set(pq.ParquetFile(path).schema_arrow.names)
     return [column for column in wanted if column in available]
@@ -137,14 +138,16 @@ def _existing_columns(path: Path, wanted: Iterable[str]) -> list[str]:
     raise ValueError(f"Unsupported Rubin input format: {path}")
 
 
-def _rubin_input_row_count(path: Path) -> Optional[int]:
+def _rubin_input_row_count(path: Path) -> int | None:
     if path.suffix.lower() != ".parquet":
         return None
 
     try:
         import pyarrow.parquet as pq
     except ImportError as exc:
-        raise ImportError("Rubin Parquet scoring requires pyarrow. Install project requirements first.") from exc
+        raise ImportError(
+            "Rubin Parquet scoring requires pyarrow. Install project requirements first."
+        ) from exc
 
     return int(pq.ParquetFile(path).metadata.num_rows)
 
@@ -206,7 +209,7 @@ def _fill_missing(base: pd.Series, fallback: pd.Series) -> pd.Series:
 
 def _is_missing_value(value: object) -> bool:
     try:
-        missing = pd.isna(value)
+        missing = pd.isna(cast(Any, value))
     except (TypeError, ValueError):
         return False
     if isinstance(missing, (bool, np.bool_)):
@@ -304,8 +307,12 @@ def normalize_rubin_chunk(raw: pd.DataFrame, row_offset: int, config: RubinScori
             "answer": _normalize_answer_values(raw),
             "train": normalize_bool(first_present_column(raw, ["train"]), default=False),
             "batch": pd.to_numeric(first_present_column(raw, ["batch"]), errors="coerce"),
-            "started_at": pd.to_datetime(first_present_column(raw, ["started_at"]), errors="coerce", utc=True),
-            "finished_at": pd.to_datetime(first_present_column(raw, ["finished_at"]), errors="coerce", utc=True),
+            "started_at": pd.to_datetime(
+                first_present_column(raw, ["started_at"]), errors="coerce", utc=True
+            ),
+            "finished_at": pd.to_datetime(
+                first_present_column(raw, ["finished_at"]), errors="coerce", utc=True
+            ),
         }
     )
     for column in ("user_key", "user_name", "review_unit_id", "object_id", "subject_id"):
@@ -321,7 +328,9 @@ def _first_non_null(values: pd.Series) -> object:
 
 
 def _update_registry(registry: dict[str, dict[str, object]], chunk: pd.DataFrame) -> None:
-    candidates = chunk.loc[chunk["review_unit_id"].notna(), ["review_unit_id", "object_id", "subject_id", "batch"]]
+    candidates = chunk.loc[
+        chunk["review_unit_id"].notna(), ["review_unit_id", "object_id", "subject_id", "batch"]
+    ]
     if candidates.empty:
         return
 
@@ -335,25 +344,25 @@ def _update_registry(registry: dict[str, dict[str, object]], chunk: pd.DataFrame
         if key not in registry:
             registry[key] = {
                 "review_unit_id": key,
-                **dict(zip(columns, values)),
+                **dict(zip(columns, values, strict=False)),
             }
             continue
         current = registry[key]
-        for column, value in zip(columns, values):
-            if pd.isna(current.get(column)) and pd.notna(value):
+        for column, value in zip(columns, values, strict=False):
+            if pd.isna(cast(Any, current.get(column))) and pd.notna(value):
                 current[column] = value
 
 
 def _add_series_counts(target: dict[str, int], counts: pd.Series) -> None:
     for key, value in counts.items():
-        if pd.isna(key):
+        if pd.isna(cast(Any, key)):
             continue
         target[str(key)] = target.get(str(key), 0) + int(value)
 
 
 def _add_grouped_stats(target: dict[str, dict[str, int]], stats: pd.DataFrame) -> None:
     for user_key, row in stats.iterrows():
-        if pd.isna(user_key):
+        if pd.isna(cast(Any, user_key)):
             continue
         user = str(user_key)
         current = target.setdefault(
@@ -376,8 +385,8 @@ def _prepare_chunk_factory(
 def _first_pass(
     chunk_factory: Callable[[], Iterable[pd.DataFrame]],
     config: RubinScoringConfig,
-    progress: Optional[ProgressCallback] = None,
-    total_rows: Optional[int] = None,
+    progress: ProgressCallback | None = None,
+    total_rows: int | None = None,
 ) -> tuple[pd.DataFrame, dict[str, dict[str, object]], dict[str, int | float]]:
     """Stream once to build volunteer weights and the review-unit registry."""
 
@@ -412,13 +421,17 @@ def _first_pass(
             within = chunk.loc[has_user].groupby("user_key", sort=False).cumcount() + 1
             user_index = pd.Series(pd.NA, index=chunk.index, dtype="Int64")
             user_index.loc[has_user] = (prior.to_numpy() + within.to_numpy()).astype("int64")
-            _add_series_counts(user_seen, chunk.loc[has_user, "user_key"].astype(str).value_counts(sort=False))
+            _add_series_counts(
+                user_seen, chunk.loc[has_user, "user_key"].astype(str).value_counts(sort=False)
+            )
         else:
             user_index = pd.Series(pd.NA, index=chunk.index, dtype="Int64")
 
         valid_answer = chunk["answer"].isin([0.0, 1.0])
         under_cap = user_index.le(config.max_user_classifications).fillna(False)
-        problematic = chunk["train"] & chunk["review_unit_id"].astype("string").isin(config.problematic_training_review_units)
+        problematic = chunk["train"] & chunk["review_unit_id"].astype("string").isin(
+            config.problematic_training_review_units
+        )
         stats_mask = valid_answer & under_cap & ~problematic & chunk["user_key"].notna()
         yes_mask = chunk["answer"] == 1.0
         train_mask = stats_mask & chunk["train"]
@@ -456,7 +469,9 @@ def _first_pass(
     return user_weights.reset_index(), registry, diagnostics
 
 
-def _prepare_votes(chunk: pd.DataFrame, user_weights: pd.DataFrame, config: RubinScoringConfig) -> pd.DataFrame:
+def _prepare_votes(
+    chunk: pd.DataFrame, user_weights: pd.DataFrame, config: RubinScoringConfig
+) -> pd.DataFrame:
     """Attach final volunteer weights to valid review-unit votes."""
 
     user_lookup = user_weights.set_index("user_key")
@@ -467,10 +482,14 @@ def _prepare_votes(chunk: pd.DataFrame, user_weights: pd.DataFrame, config: Rubi
     if config.min_user_classifications > 1:
         valid &= chunk["user_key"].map(classification_counts).fillna(0) >= config.min_user_classifications
 
-    votes = chunk.loc[valid, ["row_order", "review_unit_id", "object_id", "subject_id", "batch", "user_key", "answer"]].copy()
+    votes = chunk.loc[
+        valid, ["row_order", "review_unit_id", "object_id", "subject_id", "batch", "user_key", "answer"]
+    ].copy()
     if votes.empty:
         return votes
-    votes["weight"] = votes["user_key"].map(weights).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype("float64")
+    votes["weight"] = (
+        votes["user_key"].map(weights).replace([np.inf, -np.inf], np.nan).fillna(0.0).astype("float64")
+    )
     return votes
 
 
@@ -516,10 +535,19 @@ def _insert_votes(connection: sqlite3.Connection, votes: pd.DataFrame, dedupe: b
 
     if votes.empty:
         return
-    columns = ["review_unit_id", "user_key", "row_order", "object_id", "subject_id", "batch", "answer", "weight"]
+    columns = [
+        "review_unit_id",
+        "user_key",
+        "row_order",
+        "object_id",
+        "subject_id",
+        "batch",
+        "answer",
+        "weight",
+    ]
     records = []
     for row in votes[columns].itertuples(index=False, name=None):
-        records.append(tuple(None if pd.isna(value) else value for value in row))
+        records.append(tuple(None if pd.isna(cast(Any, value)) else value for value in row))
     if dedupe:
         connection.executemany(
             """
@@ -576,8 +604,8 @@ def _score_review_units(
     user_weights: pd.DataFrame,
     registry: dict[str, dict[str, object]],
     config: RubinScoringConfig,
-    progress: Optional[ProgressCallback] = None,
-    total_rows: Optional[int] = None,
+    progress: ProgressCallback | None = None,
+    total_rows: int | None = None,
 ) -> tuple[pd.DataFrame, int]:
     """Stream a second time to score review units with final user weights."""
 
@@ -616,7 +644,9 @@ def _score_review_units(
     for column in ("object_id", "subject_id", "batch"):
         scored_column = f"{column}_scored"
         if scored_column in review_units.columns:
-            review_units[column] = review_units[column].mask(review_units[column].isna(), review_units[scored_column])
+            review_units[column] = review_units[column].mask(
+                review_units[column].isna(), review_units[scored_column]
+            )
             review_units = review_units.drop(columns=[scored_column])
 
     for column in ("numerator", "denominator", "vote_count", "yes_count"):
@@ -671,12 +701,19 @@ def _build_object_scores(review_units: pd.DataFrame, top_k: int) -> pd.DataFrame
         review_unit_count=("review_unit_id", "size"),
         vote_count=("vote_count", "sum"),
     ).reset_index()
-    top_scores = grouped["score"].apply(lambda values: _top_k_mean(values, top_k)).rename("top_3_mean_score").reset_index()
+    top_scores = (
+        grouped["score"]
+        .apply(lambda values: _top_k_mean(values, top_k))
+        .rename("top_3_mean_score")
+        .reset_index()
+    )
     object_scores = object_scores.merge(top_scores, on="object_id", how="left")
     object_scores["object_score"] = object_scores["top_3_mean_score"]
 
     best = (
-        review_units.sort_values(["object_id", "score", "vote_count", "review_unit_id"], ascending=[True, False, False, True])
+        review_units.sort_values(
+            ["object_id", "score", "vote_count", "review_unit_id"], ascending=[True, False, False, True]
+        )
         .drop_duplicates("object_id", keep="first")[["object_id", "review_unit_id"]]
         .rename(columns={"review_unit_id": "best_review_unit"})
     )
@@ -698,14 +735,17 @@ def _build_object_scores(review_units: pd.DataFrame, top_k: int) -> pd.DataFrame
 def score_rubin_chunks(
     chunks: Callable[[], Iterable[pd.DataFrame]] | Iterable[pd.DataFrame],
     config: RubinScoringConfig | None = None,
-    progress: Optional[ProgressCallback] = None,
-    total_rows: Optional[int] = None,
+    progress: ProgressCallback | None = None,
+    total_rows: int | None = None,
 ) -> RubinScoreResult:
     """Score Rubin classifications from a reusable chunk source."""
 
     active_config = config or RubinScoringConfig()
     chunk_factory = _prepare_chunk_factory(chunks)
-    user_weights, registry, diagnostics = _first_pass(chunk_factory, active_config, progress, total_rows)
+    user_weights, registry, first_diagnostics = _first_pass(
+        chunk_factory, active_config, progress, total_rows
+    )
+    diagnostics: dict[str, int | float | str] = dict(first_diagnostics)
     review_units, scored_votes = _score_review_units(
         chunk_factory,
         user_weights,
@@ -725,9 +765,15 @@ def score_rubin_chunks(
             "objects": int(object_scores["object_id"].nunique(dropna=True)),
             "scored_votes": scored_votes,
             "users": int(user_weights["user_key"].nunique(dropna=True)),
-            "object_score_min": float(object_scores["object_score"].min()) if not object_scores.empty else math.nan,
-            "object_score_max": float(object_scores["object_score"].max()) if not object_scores.empty else math.nan,
-            "object_score_mean": float(object_scores["object_score"].mean()) if not object_scores.empty else math.nan,
+            "object_score_min": float(object_scores["object_score"].min())
+            if not object_scores.empty
+            else math.nan,
+            "object_score_max": float(object_scores["object_score"].max())
+            if not object_scores.empty
+            else math.nan,
+            "object_score_mean": float(object_scores["object_score"].mean())
+            if not object_scores.empty
+            else math.nan,
             "objects_above_cutoff": int((object_scores["object_score"] >= active_config.cutoff).sum()),
         }
     )
@@ -742,7 +788,7 @@ def score_rubin_chunks(
 def score_rubin_file(
     path: str | Path,
     config: RubinScoringConfig | None = None,
-    progress: Optional[ProgressCallback] = None,
+    progress: ProgressCallback | None = None,
 ) -> RubinScoreResult:
     """Score a CSV or Parquet Rubin export from disk."""
 
@@ -757,7 +803,7 @@ def score_rubin_file(
 
 
 def write_rubin_outputs(
-    result: RubinScoreResult, output_dir: str | Path, label: Optional[str], cutoff: float
+    result: RubinScoreResult, output_dir: str | Path, label: str | None, cutoff: float
 ) -> Mapping[str, Path]:
     """Write Rubin review-unit, object, and volunteer-weight CSV outputs."""
 
@@ -769,7 +815,16 @@ def write_rubin_outputs(
     object_path = outdir / f"rubin_object_scores_{output_label}.csv"
     weights_path = outdir / f"rubin_user_weights_{output_label}.csv"
 
-    review_columns = ["review_unit_id", "object_id", "subject_id", "score", "vote_count", "yes_count", "weight_sum", "batch"]
+    review_columns = [
+        "review_unit_id",
+        "object_id",
+        "subject_id",
+        "score",
+        "vote_count",
+        "yes_count",
+        "weight_sum",
+        "batch",
+    ]
     object_columns = [
         "object_id",
         "object_score",
@@ -781,6 +836,8 @@ def write_rubin_outputs(
         "best_review_unit",
     ]
     result.review_unit_scores[review_columns].to_csv(review_unit_path, index=False)
-    result.object_scores[object_columns].sort_values("object_score", ascending=False).to_csv(object_path, index=False)
+    result.object_scores[object_columns].sort_values("object_score", ascending=False).to_csv(
+        object_path, index=False
+    )
     result.user_weights.to_csv(weights_path, index=False)
     return {"review_units": review_unit_path, "objects": object_path, "user_weights": weights_path}

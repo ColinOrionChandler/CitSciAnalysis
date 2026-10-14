@@ -1,21 +1,131 @@
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
 
 [project]
 name = "citsci-analysis"
-version = "0.1.0"
-description = "Modern scoring tools for Active Asteroids citizen-science classifications."
-requires-python = ">=3.9"
-dependencies = [
-    "numpy>=1.26",
-    "pandas>=2.2",
-    "pyarrow>=15",
-    "tqdm>=4.66",
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+readme = "README.md"
+authors = [
+    { name = "Will Burris, Colin Chandler, and Chad Trujillo" }
 ]
+description = "Scoring tools for Active Asteroids and Rubin Comet Catchers citizen-science classifications."
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+]
+dynamic = ["version"]
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26", "pandas>=2.2", "pyarrow>=15", "tqdm>=4.66"]
 
+[project.urls]
+"Source Code" = "https://github.com/ColinOrionChandler/CitSciAnalysis"
+
+# On a mac, install optional dependencies with `pip install '.[dev]'` (include the single quotes)
+[project.optional-dependencies]
+test = ["pytest", "pytest-cov"]
+typing = ["mypy==2.4.0", "pandas-stubs", "types-tqdm", "pytest"]
+dev = [
+    "asv==0.6.5", "virtualenv", # Used to compute performance benchmarks
+    "mypy==2.4.0", # Used for static type checking of files
+    "pre-commit", # Used to run checks before finalizing a git commit
+    "pandas-stubs",
+    "types-tqdm",
+    "build",
+    "twine",
+    "pytest",
+    "pytest-cov", # Used to report total code coverage
+    "ruff==0.17.0", # Used for static linting of files
+]
+# Command-line scripts that can be run after installing the package
 [project.scripts]
 citsci-score = "citsci_analysis.cli:main"
 
+[build-system]
+requires = [
+    "setuptools>=77", # Used to build and package the Python project
+    "setuptools_scm>=8", # Gets release version from git. Makes it available programmatically
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+write_to = "src/citsci_analysis/_version.py"
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
+addopts = "-ra"
+log_cli_level = "INFO"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["historic_code", "src/citsci_analysis/_version.py"]
+[tool.ruff.lint]
+select = [
+    # pycodestyle
+    "E",
+    "W",
+    # Pyflakes
+    "F",
+    # pep8-naming
+    "N",
+    # pyupgrade
+    "UP",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+    # docstrings
+    "D101",
+    "D102",
+    "D103",
+    "D106",
+    "D206",
+    "D207",
+    "D208",
+    "D300",
+    "D417",
+    "D419",
+    # Numpy v2.0 compatibility
+    "NPY201",
+    ]
+ignore = [
+    "UP006", # Allow non standard library generics in type hints
+    "UP007", # Allow Union in type hints
+    "SIM114", # Allow if with same arms
+    "B028", # Allow default warning level
+    "SIM117", # Allow nested with
+    "UP015", # Allow redundant open parameters
+    "UP028", # Allow yield in for loop
+]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src", "tests", "benchmarks"]
+exclude = ["_version.py"]
+[tool.setuptools.package-data]
+citsci_analysis = ["py.typed"]
+
+[tool.coverage.run]
+omit=["src/citsci_analysis/_version.py"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
+
+# Arrow has no bundled typing metadata; keep this exception at the dependency boundary.
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
+
+[tool.coverage.report]
+fail_under = 86.24
+precision = 2

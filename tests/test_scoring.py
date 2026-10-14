@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -60,7 +62,7 @@ def test_naive_scoring_uses_static_user_weights_and_dedupes() -> None:
     assert result.diagnostics["thumbnails"] == 3
 
 
-def test_load_classifications_normalizes_csv_columns_and_user_fallbacks(tmp_path) -> None:
+def test_load_classifications_normalizes_csv_columns_and_user_fallbacks(tmp_path: Path) -> None:
     input_path = tmp_path / "classifications.csv"
     pd.DataFrame(
         {
@@ -86,7 +88,7 @@ def test_load_classifications_normalizes_csv_columns_and_user_fallbacks(tmp_path
     assert normalized["class"].isna().all()
 
 
-def test_load_classifications_preserves_class_column(tmp_path) -> None:
+def test_load_classifications_preserves_class_column(tmp_path: Path) -> None:
     input_path = tmp_path / "classifications.csv"
     pd.DataFrame(
         {
@@ -104,7 +106,7 @@ def test_load_classifications_preserves_class_column(tmp_path) -> None:
     assert pd.isna(normalized["class"].iloc[1])
 
 
-def test_load_problematic_training_thumbs_accepts_csv_variants(tmp_path) -> None:
+def test_load_problematic_training_thumbs_accepts_csv_variants(tmp_path: Path) -> None:
     input_path = tmp_path / "problematic.csv"
     pd.DataFrame(
         {
@@ -194,7 +196,7 @@ def test_time_and_legacy_modes_return_row_weights() -> None:
         assert set(user_weights["user_key"]) == {"u1", "u2"}
 
 
-def test_write_and_compare_score_outputs_average_duplicate_reference(tmp_path) -> None:
+def test_write_and_compare_score_outputs_average_duplicate_reference(tmp_path: Path) -> None:
     frame = pd.DataFrame(
         {
             "row_order": [0, 1],
@@ -240,7 +242,9 @@ def test_write_and_compare_score_outputs_average_duplicate_reference(tmp_path) -
         ("path,score\n/tmp/active.png,6.0\n/tmp/quiet.png,2.0\n/tmp/coc_only.png,9.0\n", 6.0),
     ],
 )
-def test_write_score_outputs_adds_coc_score_to_total_and_filtered(tmp_path, coc_text: str, expected: float) -> None:
+def test_write_score_outputs_adds_coc_score_to_total_and_filtered(
+    tmp_path: Path, coc_text: str, expected: float
+) -> None:
     frame = pd.DataFrame(
         {
             "row_order": [0, 1],
@@ -282,7 +286,7 @@ def test_write_score_outputs_adds_coc_score_to_total_and_filtered(tmp_path, coc_
     assert result.diagnostics["coc_matched_rows"] == 2
 
 
-def test_write_score_outputs_keeps_last_duplicate_coc_score(tmp_path) -> None:
+def test_write_score_outputs_keeps_last_duplicate_coc_score(tmp_path: Path) -> None:
     frame = pd.DataFrame(
         {
             "row_order": [0],
@@ -308,7 +312,9 @@ def test_write_score_outputs_keeps_last_duplicate_coc_score(tmp_path) -> None:
     assert result.diagnostics["coc_duplicate_rows_removed"] == 1
 
 
-def test_cli_scores_active_asteroids_csv_with_progress(tmp_path, capsys) -> None:
+def test_cli_scores_active_asteroids_csv_with_progress(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     input_path = tmp_path / "classifications.csv"
     output_dir = tmp_path / "results"
     pd.DataFrame(
@@ -325,7 +331,8 @@ def test_cli_scores_active_asteroids_csv_with_progress(tmp_path, capsys) -> None
 
     status = main(
         [
-            "score", "--no-workset",
+            "score",
+            "--no-workset",
             str(input_path),
             "--output-dir",
             str(output_dir),
@@ -353,7 +360,9 @@ def test_cli_scores_active_asteroids_csv_with_progress(tmp_path, capsys) -> None
     assert (output_dir / "user_weights_active.csv").exists()
 
 
-def test_cli_scores_active_asteroids_with_explicit_coc_scores(tmp_path, capsys) -> None:
+def test_cli_scores_active_asteroids_with_explicit_coc_scores(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     input_path = tmp_path / "classifications.csv"
     output_dir = tmp_path / "results"
     coc_path = tmp_path / "coc_scores.csv"
@@ -370,7 +379,8 @@ def test_cli_scores_active_asteroids_with_explicit_coc_scores(tmp_path, capsys) 
 
     status = main(
         [
-            "score", "--no-workset",
+            "score",
+            "--no-workset",
             str(input_path),
             "--output-dir",
             str(output_dir),
@@ -395,7 +405,7 @@ def test_cli_scores_active_asteroids_with_explicit_coc_scores(tmp_path, capsys) 
     assert filtered.loc[0, "coc_score"] == 5.0
 
 
-def test_cli_explicit_missing_coc_scores_path_is_an_error(tmp_path) -> None:
+def test_cli_explicit_missing_coc_scores_path_is_an_error(tmp_path: Path) -> None:
     input_path = tmp_path / "classifications.csv"
     pd.DataFrame(
         {
@@ -411,7 +421,7 @@ def test_cli_explicit_missing_coc_scores_path_is_an_error(tmp_path) -> None:
         main(["score", "--no-workset", str(input_path), "--coc-scores", str(tmp_path / "missing.csv")])
 
 
-def test_cli_compare_and_inspect_inputs(tmp_path, capsys) -> None:
+def test_cli_compare_and_inspect_inputs(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     old_csv = tmp_path / "old.csv"
     new_parquet = tmp_path / "new.parquet"
     pd.DataFrame(

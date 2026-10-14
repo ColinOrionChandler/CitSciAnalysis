@@ -1,26 +1,40 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import cast
+
 import numpy as np
 import pandas as pd
+import pytest
 
 from citsci_analysis.cli import main
-from citsci_analysis.rubin import RubinScoringConfig, score_rubin_chunks, _update_registry
+from citsci_analysis.rubin import RubinScoringConfig, _update_registry, score_rubin_chunks
 
 
 def test_registry_fills_columns_independently_and_preserves_first_values() -> None:
-    registry = {}
-    _update_registry(registry, pd.DataFrame({
-        "review_unit_id": ["a", "a", "b", None],
-        "object_id": [None, "object-a", None, "ignored"],
-        "subject_id": ["subject-a", None, "subject-b", "ignored"],
-        "batch": [None, 2, None, 99],
-    }))
-    _update_registry(registry, pd.DataFrame({
-        "review_unit_id": ["a", "b"],
-        "object_id": ["conflicting-object", "object-b"],
-        "subject_id": ["conflicting-subject", None],
-        "batch": [3, 4],
-    }))
+    registry: dict[str, dict[str, object]] = {}
+    _update_registry(
+        registry,
+        pd.DataFrame(
+            {
+                "review_unit_id": ["a", "a", "b", None],
+                "object_id": [None, "object-a", None, "ignored"],
+                "subject_id": ["subject-a", None, "subject-b", "ignored"],
+                "batch": [None, 2, None, 99],
+            }
+        ),
+    )
+    _update_registry(
+        registry,
+        pd.DataFrame(
+            {
+                "review_unit_id": ["a", "b"],
+                "object_id": ["conflicting-object", "object-b"],
+                "subject_id": ["conflicting-subject", None],
+                "batch": [3, 4],
+            }
+        ),
+    )
     assert registry == {
         "a": {"review_unit_id": "a", "object_id": "object-a", "subject_id": "subject-a", "batch": 2},
         "b": {"review_unit_id": "b", "object_id": "object-b", "subject_id": "subject-b", "batch": 4},
@@ -46,8 +60,28 @@ def _rubin_frame() -> pd.DataFrame:
             "answer": [1, 1, 0, 1, 0, 1, 0, 1, 1],
             "train": [True, False, False, True, False, False, False, False, False],
             "batch": [1] * 9,
-            "class": ["train", "object-a", "object-a", "train", "object-a", "object-a", None, None, "object-a"],
-            "subject_id": ["train-subject", "sub-a", "sub-a", "train-subject", "sub-a", "sub-a", "subject-b", "subject-b", "sub-a"],
+            "class": [
+                "train",
+                "object-a",
+                "object-a",
+                "train",
+                "object-a",
+                "object-a",
+                None,
+                None,
+                "object-a",
+            ],
+            "subject_id": [
+                "train-subject",
+                "sub-a",
+                "sub-a",
+                "train-subject",
+                "sub-a",
+                "sub-a",
+                "subject-b",
+                "subject-b",
+                "sub-a",
+            ],
         }
     )
 
@@ -63,7 +97,7 @@ def test_rubin_scoring_dedupes_across_chunks_and_rolls_up_objects() -> None:
 
     assert review_units.loc["obj_a_1", "vote_count"] == 2
     assert review_units.loc["obj_a_1", "yes_count"] == 1
-    assert 0.0 < review_units.loc["obj_a_1", "score"] < 1.0
+    assert 0.0 < cast(float, review_units.loc["obj_a_1", "score"]) < 1.0
     assert review_units.loc["obj_a_2", "score"] == 1.0
 
     assert objects.loc["object-a", "best_review_unit"] == "obj_a_2"
@@ -110,14 +144,15 @@ def test_rubin_ids_can_come_from_subject_metadata() -> None:
     assert result.object_scores.loc[0, "object_id"] == "comet-001"
 
 
-def test_rubin_cli_writes_rubin_outputs(tmp_path) -> None:
+def test_rubin_cli_writes_rubin_outputs(tmp_path: Path) -> None:
     input_path = tmp_path / "rubin.csv"
     output_dir = tmp_path / "results"
     _rubin_frame().to_csv(input_path, index=False)
 
     status = main(
         [
-            "score", "--no-workset",
+            "score",
+            "--no-workset",
             str(input_path),
             "--output-dir",
             str(output_dir),
@@ -143,14 +178,15 @@ def test_rubin_cli_writes_rubin_outputs(tmp_path) -> None:
     assert "object-a" in set(objects["object_id"])
 
 
-def test_rubin_cli_progress_reports_chunk_passes(tmp_path, capsys) -> None:
+def test_rubin_cli_progress_reports_chunk_passes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     input_path = tmp_path / "rubin.csv"
     output_dir = tmp_path / "results"
     _rubin_frame().to_csv(input_path, index=False)
 
     status = main(
         [
-            "score", "--no-workset",
+            "score",
+            "--no-workset",
             str(input_path),
             "--output-dir",
             str(output_dir),
