@@ -86,5 +86,13 @@ the workflow uses GitHub OIDC. Codecov is not reported as operational yet.
 
 GitHub repository visibility is public, Dependabot vulnerability alerts are enabled,
 and main requires all ten test/quality/package/documentation checks through a PR,
-with zero mandatory reviewer approvals. Benchmark execution and PR comparison have
-passed; live Pages deployment will be verified after the migration is merged.
+with zero mandatory reviewer approvals. The migration merged through
+[PR #1](https://github.com/ColinOrionChandler/CitSciAnalysis/pull/1) at `7e7ce50`;
+all required checks passed before merge and all main workflows passed afterward.
+
+The [public benchmark dashboard](https://colinorionchandler.github.io/CitSciAnalysis/)
+is live. GitHub Pages deployment succeeded, and its rendered benchmark list was
+inspected with all six runtime/peak-memory measurements for the migration baseline.
+Results are retained on the `benchmarks` branch; generated HTML is served from
+`gh-pages`. Timing comparisons remain advisory. Read the Docs, Codecov, and PyPI
+account activation remain pending as described above.
