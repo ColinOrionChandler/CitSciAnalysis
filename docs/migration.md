@@ -44,7 +44,7 @@ publisher registration may require user account authorization.
 This project uses the [LINCC Frameworks Python Project Template](https://github.com/lincc-frameworks/python-project-template).
 See its [citation guidance](https://lincc-ppt.readthedocs.io/en/latest/source/citation.html).
 
-## Validation evidence (2026-10-14)
+## Initial validation evidence (2026-10-14)
 
 - Baseline `cd96e14`: 69 upstream tests, 86.2464% statement coverage.
 - Migration: 73 tests including four installed-package checks. Maintained-code
@@ -52,8 +52,8 @@ See its [citation guidance](https://lincc-ppt.readthedocs.io/en/latest/source/ci
   two decimals), with Codecov configured to compare against the base revision.
 - Synthetic 90-vote fixtures were run against an untouched archive of the baseline
   and the migrated code. Naive, time, and legacy modes were checked with both CSV
-  and Parquet; Rubin used nine chunks including duplicate votes and independently
-  missing metadata. All output CSV bytes matched, including duplicate COC sidecar
+  and Parquet; Rubin used nine chunks with independently missing metadata.
+  Actual duplicate-vote coverage was added in the final audit below. All output CSV bytes matched, including duplicate COC sidecar
   handling. Diagnostics matched after removing only the temporary sidecar path.
 - Strict mypy covers 14 source/test/benchmark files; Ruff lint and formatting pass.
 - CI passes all five Python/platform combinations and Python 3.11 with the lowest
@@ -99,7 +99,8 @@ account activation remain pending as described above.
 
 ## Final audit (2026-10-14)
 
-The merged migration at `2c3189a` was reviewed against the full plan. The audit
+The merged migration at `2c3189a` was reviewed against the full plan in
+[audit PR #9](https://github.com/ColinOrionChandler/CitSciAnalysis/pull/9). The audit
 found validation/reporting gaps and corrected them without changing scientific
 implementation or historical code:
 
@@ -132,10 +133,10 @@ implementation or historical code:
 | Template and history | Answers match the separately generated v2.3.0 template; original Git history and `historic_code/` are preserved. |
 | Scientific/API compatibility | Original tests and installed API/CLI checks pass; the expanded before/after comparison passes for all 75 files. |
 | Packaging and release preparation | Wheel and sdist pass archive checks and Twine; installed-package and unbuilt-source checks pass. Release upload remains restricted to published, valid version-tagged releases on main history. |
-| Quality and coverage | Ruff and strict mypy pass; measured coverage remains 86.38%, above the unchanged 86.24% baseline floor. |
+| Quality and coverage | All 81 tests, Ruff, and strict mypy pass; measured coverage remains 86.38%, above the unchanged 86.24% baseline floor. |
 | Documentation | Sphinx builds with warnings as errors; existing scientific explanations and historical benchmark results remain included. |
 | CI and public repository | Python 3.11–3.14/Linux, 3.12/macOS, lowest direct dependencies, daily smoke schedule, and ten required PR checks are retained. No extra approving reviewer is required. |
-| Benchmark hosting | Public Pages dashboard and retained results were verified; corrected PR and main workflows must pass before rollout is considered verified. |
+| Benchmark hosting | Public Pages dashboard and retained results were verified; corrected PR reports include both revisions and main publication retains earlier records. |
 | Deferred accounts | Read the Docs import, Codecov activation, and PyPI publisher registration remain pending by owner instruction; none is represented as operational. |
 | Release restraint | No version tag, GitHub release, or package upload was created. |
 
