@@ -1,0 +1,75 @@
+{
+    "benchmarks.Registry.peakmem_registry": {
+        "code": "class Registry:\n    def peakmem_registry(self) -> None:\n        \"\"\"Measure registry aggregation peak memory.\"\"\"\n        self.time_registry()\n\n    def setup(self) -> None:\n        \"\"\"Include independent missing metadata fields in the workload.\"\"\"\n        i = np.arange(50_000)\n        self.chunk = pd.DataFrame(\n            {\n                \"review_unit_id\": \"review\" + pd.Series(i % 5000).astype(str),\n                \"object_id\": pd.Series(np.where(i % 2 == 0, \"synthetic\", None), dtype=\"string\"),\n                \"subject_id\": pd.Series(np.where(i % 3 == 0, \"subject\", None), dtype=\"string\"),\n                \"batch\": np.where(i % 5 == 0, 1.0, np.nan),\n            }\n        )",
+        "name": "benchmarks.Registry.peakmem_registry",
+        "param_names": [],
+        "params": [],
+        "type": "peakmemory",
+        "unit": "bytes",
+        "version": "9dc6e1aefd61d7df144da0ecfbcf1bab330db8c7e6365d2647251edbf59d6780"
+    },
+    "benchmarks.Registry.time_registry": {
+        "code": "class Registry:\n    def time_registry(self) -> None:\n        \"\"\"Time first-non-null metadata aggregation.\"\"\"\n        registry: dict[str, dict[str, object]] = {}\n        _update_registry(registry, self.chunk)\n\n    def setup(self) -> None:\n        \"\"\"Include independent missing metadata fields in the workload.\"\"\"\n        i = np.arange(50_000)\n        self.chunk = pd.DataFrame(\n            {\n                \"review_unit_id\": \"review\" + pd.Series(i % 5000).astype(str),\n                \"object_id\": pd.Series(np.where(i % 2 == 0, \"synthetic\", None), dtype=\"string\"),\n                \"subject_id\": pd.Series(np.where(i % 3 == 0, \"subject\", None), dtype=\"string\"),\n                \"batch\": np.where(i % 5 == 0, 1.0, np.nan),\n            }\n        )",
+        "min_run_count": 2,
+        "name": "benchmarks.Registry.time_registry",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "396f562fe34289f253eb87467d5845e8fcc1135d66f89110c7b074a34ab26b5b",
+        "warmup_time": -1
+    },
+    "benchmarks.Scoring.peakmem_classic": {
+        "code": "class Scoring:\n    def peakmem_classic(self) -> None:\n        \"\"\"Measure classic scorer peak memory.\"\"\"\n        self.time_classic()\n\n    def setup(self) -> None:\n        \"\"\"Construct reusable inputs outside the timed region.\"\"\"\n        self.frame = classifications(10_000)\n        self.raw = self.frame.rename(columns={\"user_key\": \"unused\"}).copy()\n        self.raw[\"review_unit_id\"] = self.raw[\"thumbname\"]\n        self.raw[\"object_id\"] = \"object\" + pd.Series(np.arange(len(self.raw)) % 20).astype(str)\n        self.chunks = [self.raw.iloc[start : start + 2000].copy() for start in range(0, len(self.raw), 2000)]",
+        "name": "benchmarks.Scoring.peakmem_classic",
+        "param_names": [],
+        "params": [],
+        "type": "peakmemory",
+        "unit": "bytes",
+        "version": "03eb9d881d5c1d88f906ff42c043a41ad54c8aa8bea92dc7f49c07a5ad089bf0"
+    },
+    "benchmarks.Scoring.peakmem_rubin": {
+        "code": "class Scoring:\n    def peakmem_rubin(self) -> None:\n        \"\"\"Measure Rubin scorer peak memory.\"\"\"\n        self.time_rubin()\n\n    def setup(self) -> None:\n        \"\"\"Construct reusable inputs outside the timed region.\"\"\"\n        self.frame = classifications(10_000)\n        self.raw = self.frame.rename(columns={\"user_key\": \"unused\"}).copy()\n        self.raw[\"review_unit_id\"] = self.raw[\"thumbname\"]\n        self.raw[\"object_id\"] = \"object\" + pd.Series(np.arange(len(self.raw)) % 20).astype(str)\n        self.chunks = [self.raw.iloc[start : start + 2000].copy() for start in range(0, len(self.raw), 2000)]",
+        "name": "benchmarks.Scoring.peakmem_rubin",
+        "param_names": [],
+        "params": [],
+        "type": "peakmemory",
+        "unit": "bytes",
+        "version": "215c013b93ba06f8f98e63cda7d7c32d6c0507a8f0a78b803415590209daa3f6"
+    },
+    "benchmarks.Scoring.time_classic": {
+        "code": "class Scoring:\n    def time_classic(self) -> None:\n        \"\"\"Time static-weight classic scoring.\"\"\"\n        score_classifications(self.frame, ScoringConfig())\n\n    def setup(self) -> None:\n        \"\"\"Construct reusable inputs outside the timed region.\"\"\"\n        self.frame = classifications(10_000)\n        self.raw = self.frame.rename(columns={\"user_key\": \"unused\"}).copy()\n        self.raw[\"review_unit_id\"] = self.raw[\"thumbname\"]\n        self.raw[\"object_id\"] = \"object\" + pd.Series(np.arange(len(self.raw)) % 20).astype(str)\n        self.chunks = [self.raw.iloc[start : start + 2000].copy() for start in range(0, len(self.raw), 2000)]",
+        "min_run_count": 2,
+        "name": "benchmarks.Scoring.time_classic",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "d8f02c16d5834c022cb40b59585daaae80847349c698866f0f124abbca51a559",
+        "warmup_time": -1
+    },
+    "benchmarks.Scoring.time_rubin": {
+        "code": "class Scoring:\n    def time_rubin(self) -> None:\n        \"\"\"Time chunked Rubin aggregation including duplicate votes.\"\"\"\n        score_rubin_chunks(self.chunks, RubinScoringConfig())\n\n    def setup(self) -> None:\n        \"\"\"Construct reusable inputs outside the timed region.\"\"\"\n        self.frame = classifications(10_000)\n        self.raw = self.frame.rename(columns={\"user_key\": \"unused\"}).copy()\n        self.raw[\"review_unit_id\"] = self.raw[\"thumbname\"]\n        self.raw[\"object_id\"] = \"object\" + pd.Series(np.arange(len(self.raw)) % 20).astype(str)\n        self.chunks = [self.raw.iloc[start : start + 2000].copy() for start in range(0, len(self.raw), 2000)]",
+        "min_run_count": 2,
+        "name": "benchmarks.Scoring.time_rubin",
+        "number": 0,
+        "param_names": [],
+        "params": [],
+        "repeat": 0,
+        "rounds": 2,
+        "sample_time": 0.01,
+        "type": "time",
+        "unit": "seconds",
+        "version": "6301ada89d1356c01f21affc4fb7ef5352bc1063ddf97d275c65e93c47cfe682",
+        "warmup_time": -1
+    },
+    "version": 2
+}
