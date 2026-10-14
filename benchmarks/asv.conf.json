@@ -4,7 +4,7 @@
   "project_url": "https://github.com/ColinOrionChandler/CitSciAnalysis",
   "repo": "..",
   "branches": [
-    "main"
+    "HEAD"
   ],
   "show_commit_url": "https://github.com/ColinOrionChandler/CitSciAnalysis/commit/",
   "environment_type": "virtualenv",

@@ -9,6 +9,9 @@ permissions:
   contents: read
 jobs:
   tests:
+    permissions:
+      contents: read
+      id-token: write
     name: Tests (${{ matrix.os }}, ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -32,7 +35,7 @@ jobs:
       - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          use_oidc: true
           fail_ci_if_error: true
   minimum:
     name: Lowest direct dependencies
