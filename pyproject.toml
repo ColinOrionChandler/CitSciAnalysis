@@ -25,9 +25,10 @@ dependencies = ["numpy>=1.26", "pandas>=2.2", "pyarrow>=15", "tqdm>=4.66"]
 # On a mac, install optional dependencies with `pip install '.[dev]'` (include the single quotes)
 [project.optional-dependencies]
 test = ["pytest", "pytest-cov"]
+typing = ["mypy==2.4.0", "pandas-stubs", "types-tqdm", "pytest"]
 dev = [
     "asv==0.6.5", "virtualenv", # Used to compute performance benchmarks
-    "mypy", # Used for static type checking of files
+    "mypy==2.4.0", # Used for static type checking of files
     "pre-commit", # Used to run checks before finalizing a git commit
     "pandas-stubs",
     "types-tqdm",
@@ -124,3 +125,7 @@ where = ["src"]
 [[tool.mypy.overrides]]
 module = ["pyarrow", "pyarrow.*"]
 ignore_missing_imports = true
+
+[tool.coverage.report]
+fail_under = 86.24
+precision = 2

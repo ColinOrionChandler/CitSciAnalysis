@@ -1,4 +1,5 @@
 """Sphinx configuration for CitSciAnalysis."""
+
 project = "CitSciAnalysis"
 author = "Will Burris, Colin Chandler, and Chad Trujillo"
 copyright = "2026, CitSciAnalysis contributors"
@@ -10,4 +11,4 @@ autoapi_keep_files = False
 autoapi_add_toctree_entry = False
 napoleon_numpy_docstring = True
 html_theme = "sphinx_rtd_theme"
-exclude_patterns = ["_build", "autoapi"]
+exclude_patterns = ["_build"]

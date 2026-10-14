@@ -10,4 +10,4 @@ Scoring and candidate worksets for Active Asteroids and Rubin Comet Catchers.
    development
    releases
    migration
-   autoapi/index
+   autoapi/citsci_analysis/index

@@ -1,5 +1,22 @@
 # Development
 
-```{include} ../DEVELOPMENT_GUIDE.md
-:start-line: 2
+Install with `python -m pip install -e '.[dev]'` and run `bash .setup_dev.sh`.
+
+Required checks:
+
+```sh
+ruff check .
+ruff format --check .
+mypy
+pytest --cov=citsci_analysis
+python -m build
+python -m twine check dist/*
+sphinx-build -W --keep-going -b html docs docs/_build/html
 ```
+
+Strict typing covers source, tests, and benchmarks. Historical scripts are archived
+and excluded. Tests and benchmarks use synthetic inputs. Preserve scoring and
+workset contracts; see the repository DEVELOPMENT_GUIDE.md for contribution rules.
+
+See [migration notes](migration.md) for template updates and
+[release procedures](releases.md) for future publishing.
