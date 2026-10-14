@@ -121,6 +121,8 @@ implementation or historical code:
   corrected scoring measurements start a new series. PR reports are rendered
   after both revisions run, the comparison appears in the Actions summary, and
   failed runs retain available artifacts with an explicit failure summary.
+  Explicit Bash enables `pipefail`, so report capture cannot hide a failed comparison.
+  Remote history lookup errors also fail instead of being mistaken for an empty history.
 - Source-tree execution is now checked automatically from a clean Git archive,
   including fallback version metadata, the module CLI, and direct consolidation.
   Published metadata also declares the supported Python versions and typed status.
