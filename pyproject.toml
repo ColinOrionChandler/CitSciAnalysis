@@ -32,7 +32,7 @@ dependencies = ["numpy>=1.26", "pandas>=2.2", "pyarrow>=15", "tqdm>=4.66"]
 test = ["pytest", "pytest-cov"]
 typing = ["mypy==2.4.0", "pandas-stubs", "types-tqdm", "pytest"]
 dev = [
-    "asv==0.6.5", "virtualenv", # Used to compute performance benchmarks
+    "asv==0.6.6", "virtualenv", # Used to compute performance benchmarks
     "mypy==2.4.0", # Used for static type checking of files
     "pre-commit", # Used to run checks before finalizing a git commit
     "pandas-stubs",
