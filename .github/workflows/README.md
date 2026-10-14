@@ -1,9 +1,15 @@
 # Workflows
 
-The .yml files in this directory are used to define the various continuous
-integration scripts that will be run on your behalf e.g. nightly as a smoke check,
-or when you create a new PR.
+- `testing-and-coverage.yml`: supported Python/platform tests, coverage floor,
+  minimum direct dependencies, and optional activated Codecov uploads.
+- `pre-commit-ci.yml`: Ruff, strict mypy, wheel installation, and source-distribution rebuilding.
+- `build-documentation.yml`: warning-free Sphinx build and downloadable HTML artifact.
+- `smoke-test.yml`: daily dependency compatibility tests and manual runs.
+- `benchmarks.yml`: synthetic ASV measurements, PR comparison, retained history,
+  and GitHub Pages publication on main.
+- `publish-to-pypi.yml`: future version-tagged GitHub releases only; requires the
+  PyPI trusted publisher described in `docs/releases.md`.
 
-For more information about CI and workflows, look here: https://lincc-ppt.readthedocs.io/en/latest/practices/ci.html
-
-Or if you still have questions contact us: https://lincc-ppt.readthedocs.io/en/latest/source/contact.html
+All ten test/quality/package/documentation checks are required to merge main.
+Benchmark execution must succeed; timing comparisons are advisory.
+See `docs/migration.md` for template provenance and pending account setup.

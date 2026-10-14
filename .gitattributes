@@ -1,3 +1,6 @@
+# Preserve automatic text normalization from the existing repository.
+* text=auto
+
 # For explanation of this file and uses see
 # https://git-scm.com/docs/gitattributes
 # https://developer.lsst.io/git/git-lfs.html#using-git-lfs-enabled-repositories
