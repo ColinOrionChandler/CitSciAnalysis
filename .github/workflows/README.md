@@ -2,7 +2,7 @@
 
 - `testing-and-coverage.yml`: supported Python/platform tests, coverage floor,
   minimum direct dependencies, and optional activated Codecov uploads.
-- `pre-commit-ci.yml`: Ruff, strict mypy, wheel installation, and source-distribution rebuilding.
+- `pre-commit-ci.yml`: Ruff, strict mypy, wheel installation, source-distribution rebuilding, artifact payload checks, and baseline scientific parity.
 - `build-documentation.yml`: warning-free Sphinx build and downloadable HTML artifact.
 - `smoke-test.yml`: daily dependency compatibility tests and manual runs.
 - `benchmarks.yml`: synthetic ASV measurements, PR comparison, retained history,

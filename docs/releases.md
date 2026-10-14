@@ -17,6 +17,8 @@ belongs in this repository. A 404 from the PyPI JSON API is not a reservation.
 2. Create a version tag such as `v0.1.0` on that verified main commit.
 3. Publish the corresponding GitHub release. The workflow verifies tag syntax,
    main ancestry, package metadata, tests, and wheel/sdist contents before upload.
+   Both archive metadata versions must match the tag. Each artifact is installed
+   outside the checkout, and the sdist is rebuilt without Git before its CLI checks.
 4. Confirm the version on PyPI and install its wheel in a clean environment.
 
 Ordinary branch pushes, PRs, and merges never upload a package. This migration

@@ -12,3 +12,5 @@ autoapi_add_toctree_entry = False
 napoleon_numpy_docstring = True
 html_theme = "sphinx_rtd_theme"
 exclude_patterns = ["_build"]
+html_static_path = ["_static"]
+html_css_files = ["custom.css"]

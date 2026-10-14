@@ -11,6 +11,11 @@ assignees: ''
 
 **Environment Information**
 
+Include Python and package versions, operating system, command and scoring mode.
+Use a small synthetic example that demonstrates duplicate votes or missing fields
+when relevant. Do not attach private volunteer data, research inputs, credentials,
+or local result directories. Describe expected and actual output columns/values.
+
 
 <details>
 <summary>Traceback</summary>

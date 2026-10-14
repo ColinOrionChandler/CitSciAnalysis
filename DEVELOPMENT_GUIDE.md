@@ -20,10 +20,12 @@ mypy
 pytest --cov=citsci_analysis --cov-report=term-missing
 python -m build
 python -m twine check dist/*
+python tools/validate_distributions.py dist
+python tools/check_scientific_parity.py
 sphinx-build -W --keep-going -b html docs docs/_build/html
 ```
 
-Strict mypy covers maintained source, tests, and benchmarks. Third-party Arrow
+Strict mypy covers maintained source, tests, benchmarks, and validation tools. Third-party Arrow
 imports have a scoped missing-stubs exception; do not disable checks project-wide.
 Keep formatting/typing separate from behavior changes. Use a feature branch and
 pull request; all required checks must pass before merging, without a mandatory
