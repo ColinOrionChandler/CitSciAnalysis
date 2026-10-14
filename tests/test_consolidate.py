@@ -6,12 +6,13 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from citsci_analysis.cli import main
 from citsci_analysis.consolidate import consolidate_score_directory
 
 
-def test_consolidates_headerless_rows_and_keeps_latest_dated_score(tmp_path) -> None:
+def test_consolidates_headerless_rows_and_keeps_latest_dated_score(tmp_path: Path) -> None:
     input_path = tmp_path / "scores.csv"
     input_path.write_text(
         "\n".join(
@@ -40,7 +41,7 @@ def test_consolidates_headerless_rows_and_keeps_latest_dated_score(tmp_path) -> 
     assert rows.loc["thumb_b", "score"] == 0.0
 
 
-def test_valid_datetime_beats_undated_duplicate(tmp_path) -> None:
+def test_valid_datetime_beats_undated_duplicate(tmp_path: Path) -> None:
     input_path = tmp_path / "scores.csv"
     input_path.write_text(
         "\n".join(
@@ -58,7 +59,7 @@ def test_valid_datetime_beats_undated_duplicate(tmp_path) -> None:
     assert output.loc[0, "score"] == 2.0
 
 
-def test_all_undated_duplicates_keep_last_deterministic_row(tmp_path) -> None:
+def test_all_undated_duplicates_keep_last_deterministic_row(tmp_path: Path) -> None:
     (tmp_path / "a.csv").write_text("bad-date,0,/tmp/same.png,1\n")
     nested = tmp_path / "nested"
     nested.mkdir()
@@ -72,7 +73,7 @@ def test_all_undated_duplicates_keep_last_deterministic_row(tmp_path) -> None:
     assert output.loc[0, "score"] == 2.0
 
 
-def test_legacy_thumbname_confidence_csv_drops_extra_columns(tmp_path) -> None:
+def test_legacy_thumbname_confidence_csv_drops_extra_columns(tmp_path: Path) -> None:
     legacy_path = tmp_path / "legacy.csv"
     legacy_path.write_text(
         "\n".join(
@@ -97,7 +98,7 @@ def test_legacy_thumbname_confidence_csv_drops_extra_columns(tmp_path) -> None:
     ]
 
 
-def test_simple_headered_score_file_and_output_exclusion_on_rerun(tmp_path) -> None:
+def test_simple_headered_score_file_and_output_exclusion_on_rerun(tmp_path: Path) -> None:
     first_path = tmp_path / "first.csv"
     first_path.write_text("thumb_name,score\nnested/thumb_c.png,0.5\n")
     nested = tmp_path / "nested"
@@ -114,7 +115,9 @@ def test_simple_headered_score_file_and_output_exclusion_on_rerun(tmp_path) -> N
     assert output["score"].tolist() == [0.5, 0.75]
 
 
-def test_consolidate_scores_cli_writes_default_output(tmp_path, capsys) -> None:
+def test_consolidate_scores_cli_writes_default_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     input_path = tmp_path / "scores.csv"
     input_path.write_text("2026-05-01 00:00:00,0,/tmp/cli_thumb.png,1\n")
 
@@ -132,7 +135,7 @@ def test_consolidate_scores_cli_writes_default_output(tmp_path, capsys) -> None:
     assert summary["output_path"] == str(output_path)
 
 
-def test_consolidate_script_runs_directly_from_working_directory(tmp_path) -> None:
+def test_consolidate_script_runs_directly_from_working_directory(tmp_path: Path) -> None:
     script_path = Path(__file__).resolve().parents[1] / "src" / "citsci_analysis" / "consolidate.py"
     input_path = tmp_path / "scores.csv"
     input_path.write_text("2026-05-01 00:00:00,0,/tmp/direct_thumb.png,1\n")

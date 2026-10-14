@@ -3,16 +3,15 @@ from __future__ import annotations
 import math
 import pickle
 import warnings
-from collections.abc import MutableMapping
+from collections.abc import Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Iterable, Mapping, Optional
+from typing import cast
 
 import numpy as np
 import pandas as pd
 from numpy.polynomial import Polynomial
-
 
 DEFAULT_WEIGHTS = (7.0, 2.0, 1.0)
 DEFAULT_CUTOFF = 0.473
@@ -48,7 +47,14 @@ THUMBNAIL_SUMMARY_COLUMNS = [
 ]
 
 SCORE_OUTPUT_COLUMNS = ["thumbname", "score", "coc_score", *THUMBNAIL_SUMMARY_COLUMNS]
-COC_THUMBNAIL_COLUMNS = ("thumbnail_basename", "thumbname", "thumb_name", "ThumbName", "thumbnail", "filename")
+COC_THUMBNAIL_COLUMNS = (
+    "thumbnail_basename",
+    "thumbname",
+    "thumb_name",
+    "ThumbName",
+    "thumbnail",
+    "filename",
+)
 COC_PATH_COLUMNS = ("path", "filepath", "file_path", "image_path")
 COC_SCORE_COLUMNS = ("score", "Confidence", "confidence")
 
@@ -93,7 +99,7 @@ class ScoringConfig:
     metric_weights: tuple[float, float, float] = DEFAULT_WEIGHTS
     max_user_classifications: int = DEFAULT_MAX_USER_CLASSIFICATIONS
     min_user_classifications: int = 1
-    max_votes_per_thumb: Optional[int] = None
+    max_votes_per_thumb: int | None = None
     dedupe_user_thumbnail: bool = True
     score_all_same_shortcut: bool = False
     cutoff: float = DEFAULT_CUTOFF
@@ -102,9 +108,11 @@ class ScoringConfig:
 
 @dataclass
 class ScoreResult:
+    """Classic score tables and scalar diagnostics."""
+
     scores: pd.DataFrame
     user_weights: pd.DataFrame
-    diagnostics: Mapping[str, float | int | str]
+    diagnostics: dict[str, float | int | str]
 
 
 def _existing_columns_for_csv(path: Path, wanted: Iterable[str]) -> list[str]:
@@ -220,7 +228,11 @@ def build_user_key(frame: pd.DataFrame) -> pd.Series:
     user_name = user_name.mask(user_name.str.lower().isin(FALSE_STRINGS))
 
     fallback = pd.Series(pd.NA, index=frame.index, dtype="string")
-    for column, prefix in (("user_id", "user_id:"), ("user_ip", "user_ip:"), ("classification_id", "classification:")):
+    for column, prefix in (
+        ("user_id", "user_id:"),
+        ("user_ip", "user_ip:"),
+        ("classification_id", "classification:"),
+    ):
         if column not in frame.columns:
             continue
         candidate = _normalize_identifier_values(frame[column])
@@ -246,8 +258,12 @@ def load_classifications(path: str | Path) -> pd.DataFrame:
             "train": normalize_bool(first_present_column(raw, ["train"]), default=False),
             "class": normalize_optional_text(first_present_column(raw, ["class"])),
             "batch": pd.to_numeric(first_present_column(raw, ["batch"]), errors="coerce"),
-            "started_at": pd.to_datetime(first_present_column(raw, ["started_at"]), errors="coerce", utc=True),
-            "finished_at": pd.to_datetime(first_present_column(raw, ["finished_at"]), errors="coerce", utc=True),
+            "started_at": pd.to_datetime(
+                first_present_column(raw, ["started_at"]), errors="coerce", utc=True
+            ),
+            "finished_at": pd.to_datetime(
+                first_present_column(raw, ["finished_at"]), errors="coerce", utc=True
+            ),
         }
     )
     normalized["user_key"] = normalized["user_key"].astype("string")
@@ -268,7 +284,9 @@ def load_problematic_training_thumbs(path: str | Path) -> frozenset[str]:
     else:
         frame = pd.read_csv(input_path, low_memory=False)
 
-    thumb_column = next((name for name in ("thumb_name", "thumbname", "Thumbname", "filename") if name in frame.columns), None)
+    thumb_column = next(
+        (name for name in ("thumb_name", "thumbname", "Thumbname", "filename") if name in frame.columns), None
+    )
     if thumb_column is None:
         raise ValueError(f"No thumbnail column found in problematic-training file: {input_path}")
 
@@ -392,7 +410,9 @@ def compute_time_row_weights(frame: pd.DataFrame, config: ScoringConfig) -> tupl
     return row_weights, user_weights
 
 
-def compute_legacy_polynomial_row_weights(frame: pd.DataFrame, config: ScoringConfig) -> tuple[pd.Series, pd.DataFrame]:
+def compute_legacy_polynomial_row_weights(
+    frame: pd.DataFrame, config: ScoringConfig
+) -> tuple[pd.Series, pd.DataFrame]:
     """Approximate the historic per-user fifth-degree polynomial weighting quickly."""
 
     work = _ensure_user_index(frame)
@@ -549,14 +569,16 @@ def score_classifications(frame: pd.DataFrame, config: ScoringConfig) -> ScoreRe
         .agg(batch=("batch", _first_non_null))
         .reset_index()
     )
-    scores = all_thumbs.merge(grouped[["score", "vote_count", "batch"]], on="thumbname", how="left", suffixes=("", "_scored"))
+    scores = all_thumbs.merge(
+        grouped[["score", "vote_count", "batch"]], on="thumbname", how="left", suffixes=("", "_scored")
+    )
     scores["score"] = scores["score"].fillna(0.0).astype("float64")
     scores["vote_count"] = scores["vote_count"].fillna(0).astype("int64")
     scores["batch"] = scores["batch_scored"].combine_first(scores["batch"])
     scores = scores.merge(thumbnail_summary, on="thumbname", how="left")
     scores = scores[["thumbname", "score", "vote_count", "batch", *THUMBNAIL_SUMMARY_COLUMNS]]
 
-    diagnostics = {
+    diagnostics: dict[str, float | int | str] = {
         "mode": config.mode,
         "rows": int(len(work)),
         "thumbnails": int(scores["thumbname"].nunique()),
@@ -570,7 +592,9 @@ def score_classifications(frame: pd.DataFrame, config: ScoringConfig) -> ScoreRe
     return ScoreResult(scores=scores, user_weights=user_weights, diagnostics=diagnostics)
 
 
-def default_label(today: Optional[date] = None) -> str:
+def default_label(today: date | None = None) -> str:
+    """Return the historical year_month_day output label."""
+
     day = today or date.today()
     return f"{day.year}_{day.month}_{day.day}"
 
@@ -673,7 +697,7 @@ def _column_key(value: object) -> str:
 def write_score_outputs(
     result: ScoreResult,
     output_dir: str | Path,
-    label: Optional[str],
+    label: str | None,
     cutoff: float,
     coc_scores_path: str | Path | None = DEFAULT_COC_SCORES_PATH,
     *,
@@ -712,16 +736,28 @@ def _read_score_file(path: str | Path) -> tuple[pd.DataFrame, dict[str, int]]:
     work["thumbname"] = normalize_thumbnames(work["thumbname"])
     work["score"] = pd.to_numeric(work["score"], errors="coerce")
     duplicate_count = int(work["thumbname"].duplicated(keep=False).sum())
-    work = work.dropna(subset=["thumbname"]).groupby("thumbname", sort=False, as_index=False).agg(score=("score", "mean"))
-    return work, {"rows": int(len(frame)), "unique_thumbnails": int(work["thumbname"].nunique()), "duplicate_rows": duplicate_count}
+    work = (
+        work.dropna(subset=["thumbname"])
+        .groupby("thumbname", sort=False, as_index=False)
+        .agg(score=("score", "mean"))
+    )
+    return work, {
+        "rows": int(len(frame)),
+        "unique_thumbnails": int(work["thumbname"].nunique()),
+        "duplicate_rows": duplicate_count,
+    }
 
 
-def compare_score_files(reference_path: str | Path, candidate_path: str | Path, diff_output: str | Path | None = None) -> Mapping[str, float | int]:
+def compare_score_files(
+    reference_path: str | Path, candidate_path: str | Path, diff_output: str | Path | None = None
+) -> Mapping[str, float | int]:
     """Compare two total score files after normalizing duplicate thumbnail rows."""
 
     reference, reference_info = _read_score_file(reference_path)
     candidate, candidate_info = _read_score_file(candidate_path)
-    joined = reference.merge(candidate, on="thumbname", how="outer", suffixes=("_reference", "_candidate"), indicator=True)
+    joined = reference.merge(
+        candidate, on="thumbname", how="outer", suffixes=("_reference", "_candidate"), indicator=True
+    )
     matched = joined["_merge"] == "both"
     diff = joined.loc[matched, "score_candidate"] - joined.loc[matched, "score_reference"]
 
@@ -739,7 +775,9 @@ def compare_score_files(reference_path: str | Path, candidate_path: str | Path, 
     if matched.any():
         report.update(
             {
-                "pearson_r": float(joined.loc[matched, ["score_reference", "score_candidate"]].corr().iloc[0, 1]),
+                "pearson_r": float(
+                    cast(float, joined.loc[matched, ["score_reference", "score_candidate"]].corr().iloc[0, 1])
+                ),
                 "mean_difference": float(diff.mean()),
                 "mean_absolute_difference": float(diff.abs().mean()),
                 "median_absolute_difference": float(diff.abs().median()),

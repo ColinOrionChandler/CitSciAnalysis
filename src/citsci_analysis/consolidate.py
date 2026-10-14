@@ -7,9 +7,13 @@ import re
 import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime as datetime_type
 from pathlib import Path
-from typing import Optional
+from types import ModuleType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 try:
     from .scoring import FALSE_STRINGS
@@ -37,7 +41,7 @@ class ConsolidationResult:
 @dataclass(frozen=True)
 class _ParsedRow:
     datetime: str
-    parsed_datetime: Optional[datetime]
+    parsed_datetime: datetime_type | None
     has_datetime: bool
     malformed_datetime: bool
     path: str
@@ -102,7 +106,9 @@ def consolidate_score_directory(
         "parsed_rows": len(parsed_rows),
         "skipped_rows": skipped_rows,
         "malformed_date_rows": int(sum(row.malformed_datetime for row in parsed_rows)),
-        "unique_basenames": int(consolidated["thumbnail_basename"].nunique()) if not consolidated.empty else 0,
+        "unique_basenames": int(consolidated["thumbnail_basename"].nunique())
+        if not consolidated.empty
+        else 0,
         "duplicate_rows_removed": len(parsed_rows) - len(consolidated),
         "output_path": str(output),
     }
@@ -127,7 +133,9 @@ def _prepend_row(first_row: list[str], rows: Iterable[list[str]]) -> Iterable[li
     yield from rows
 
 
-def _parse_headerless_rows(rows: Iterable[list[str]], input_order_start: int) -> tuple[list[_ParsedRow], int, int]:
+def _parse_headerless_rows(
+    rows: Iterable[list[str]], input_order_start: int
+) -> tuple[list[_ParsedRow], int, int]:
     parsed: list[_ParsedRow] = []
     input_rows = 0
     skipped = 0
@@ -189,7 +197,10 @@ def _looks_like_headered_score_file(header: Iterable[str]) -> bool:
     score_index = _find_column(header_list, SCORE_COLUMNS)
     if score_index is None:
         return False
-    return _find_column(header_list, THUMBNAIL_COLUMNS) is not None or _find_column(header_list, PATH_COLUMNS) is not None
+    return (
+        _find_column(header_list, THUMBNAIL_COLUMNS) is not None
+        or _find_column(header_list, PATH_COLUMNS) is not None
+    )
 
 
 def _build_row(
@@ -222,7 +233,8 @@ def _build_row(
 
 
 def _rows_to_frame(rows: list[_ParsedRow]) -> pd.DataFrame:
-    pd = _pandas()
+    import pandas as pd
+
     if not rows:
         return pd.DataFrame(
             columns=[
@@ -306,13 +318,13 @@ def _parse_score(value: object) -> float | None:
         return None
 
 
-def _parse_datetime(value: object) -> tuple[Optional[datetime], str, bool, bool]:
+def _parse_datetime(value: object) -> tuple[datetime_type | None, str, bool, bool]:
     text = _clean_text(value)
     if text == "":
         return None, "", False, False
 
     try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        parsed = datetime_type.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None, "", True, True
 
@@ -328,7 +340,7 @@ def _clean_text(value: object) -> str:
     return text
 
 
-def _pandas():
+def _pandas() -> ModuleType:
     import pandas as pd
 
     return pd
@@ -343,6 +355,8 @@ def _progress_enabled(setting: str, stream: object) -> bool:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line argument parser."""
+
     parser = argparse.ArgumentParser(
         description="Consolidate recursive score CSVs to the latest score per thumbnail basename."
     )
@@ -369,6 +383,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse arguments, run the command, and return its exit status."""
+
     parser = build_parser()
     args = parser.parse_args(argv)
     show_progress = _progress_enabled(args.progress, sys.stderr)
