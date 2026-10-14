@@ -9,6 +9,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+defaults:
+  run:
+    shell: bash # Explicit Bash enables pipefail for comparison and history pipelines.
 concurrency:
   group: benchmarks-${{ github.ref }}
   cancel-in-progress: false
@@ -29,7 +32,8 @@ jobs:
       - name: Restore published benchmark history
         if: github.event_name != 'pull_request'
         run: |
-          if git ls-remote --exit-code --heads origin benchmarks; then
+          history_ref=$(git ls-remote --heads origin benchmarks)
+          if [ -n "$history_ref" ]; then
             git fetch origin benchmarks
             git archive FETCH_HEAD _results | tar -x -C benchmarks
           fi
