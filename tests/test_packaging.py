@@ -16,7 +16,12 @@ import citsci_analysis
 
 def test_distribution_metadata_and_exports() -> None:
     dist = importlib.metadata.distribution("citsci-analysis")
-    assert citsci_analysis.__version__ == dist.version
+    # Rebuilding an editable checkout can update _version.py without refreshing
+    # its installed metadata. Wheels and sdists must agree exactly.
+    direct_url = json.loads(dist.read_text("direct_url.json") or "{}")
+    if not direct_url.get("dir_info", {}).get("editable", False):
+        assert citsci_analysis.__version__ == dist.version
+    assert citsci_analysis.__version__ != "0.0.0+unknown"
     assert dist.metadata["Requires-Python"] == ">=3.11"
     assert dist.metadata["License-Expression"] == "BSD-3-Clause"
     assert Path(citsci_analysis.__file__).with_name("py.typed").is_file()

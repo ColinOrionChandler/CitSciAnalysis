@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Adopt LINCC Frameworks Python Project Template v2.3.0 with Python 3.11–3.14,
+  BSD-3-Clause licensing, setuptools-scm versions, Ruff, and strict mypy.
+- Add package/CLI compatibility checks, CI, Sphinx/AutoAPI documentation, synthetic
+  benchmarks, dependency automation, and a future PyPI trusted-publishing workflow.
+- Preserve scoring outputs and candidate-workset behavior; retain historic scripts
+  unchanged. See docs/migration.md for validation and service activation status.
+
+
 - Deduplicate AA observations by object and datetime before selecting context,
   prefer pI over p2, and retain variant provenance without reassigning image scores.
   Version AA selections so old frozen worksets cannot bypass deduplication.

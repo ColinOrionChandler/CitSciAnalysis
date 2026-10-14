@@ -43,3 +43,48 @@ publisher registration may require user account authorization.
 
 This project uses the [LINCC Frameworks Python Project Template](https://github.com/lincc-frameworks/python-project-template).
 See its [citation guidance](https://lincc-ppt.readthedocs.io/en/latest/source/citation.html).
+
+## Validation evidence (2026-10-14)
+
+- Baseline `cd96e14`: 69 upstream tests, 86.2464% statement coverage.
+- Migration: 73 tests including four installed-package checks. Maintained-code
+  coverage is above baseline; the required floor is 86.24% (baseline truncated to
+  two decimals), with Codecov configured to compare against the base revision.
+- Synthetic 90-vote fixtures were run against an untouched archive of the baseline
+  and the migrated code. Naive, time, and legacy modes were checked with both CSV
+  and Parquet; Rubin used nine chunks including duplicate votes and independently
+  missing metadata. All output CSV bytes matched, including duplicate COC sidecar
+  handling. Diagnostics matched after removing only the temporary sidecar path.
+- Strict mypy covers 14 source/test/benchmark files; Ruff lint and formatting pass.
+- CI passes all five Python/platform combinations and Python 3.11 with the lowest
+  direct dependencies. Wheel and sdist installations are tested outside the source
+  tree; the sdist is rebuilt without Git. Metadata and license validation pass.
+- Sphinx builds with warnings as errors. Navigation, installation examples, and
+  generated API pages were visually inspected in Chrome.
+- All six synthetic ASV benchmarks execute locally and in GitHub Actions. PR
+  comparison is advisory; benchmark execution failures propagate.
+- The public-visibility audit covered 101 historical blobs: no credential-pattern
+  findings or research-data files. Existing local/remote path defaults remain for
+  compatibility; no credentials are embedded. Historical scripts remain unchanged.
+
+## Account activation status
+
+Read the Docs activation is pending by the owner's explicit choice. The Sphinx
+configuration and documentation-build CI are complete. Import the public repository
+as `citsci-analysis` in Read the Docs to activate the planned documentation URL.
+
+PyPI's GitHub `pypi` environment permits version tags only. Register the pending
+trusted publisher described in [Releases](releases.md) before the first release.
+No version tag, GitHub release, or PyPI package was published by this migration.
+
+Codecov account activation is also pending: an authenticated OIDC upload returned
+`Repository not found`. Required tests still enforce the 86.24% coverage floor and
+save coverage.xml as a CI artifact. After activating this repository in Codecov,
+set the GitHub Actions repository variable `CODECOV_ENABLED=true` and rerun Tests.
+Enabled uploads fail visibly on errors. No static upload token is required because
+the workflow uses GitHub OIDC. Codecov is not reported as operational yet.
+
+GitHub repository visibility is public, Dependabot vulnerability alerts are enabled,
+and main requires all ten test/quality/package/documentation checks through a PR,
+with zero mandatory reviewer approvals. Benchmark execution and PR comparison have
+passed; live Pages deployment will be verified after the migration is merged.
