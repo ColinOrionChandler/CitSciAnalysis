@@ -57,7 +57,7 @@ jobs:
       - name: Report benchmark execution failure
         if: failure()
         run: echo 'Benchmark execution or publication failed. Inspect the failed step and retained artifacts; no performance conclusion is available.' >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: benchmarks
