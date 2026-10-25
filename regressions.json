@@ -1,1 +1,1 @@
-{"regressions": [["benchmarks.Scoring.time_classic", "graphs/branch-HEAD/build/machine-github-linux/python-3.12/benchmarks.Scoring.time_classic.json", {}, null, 0.13209303949999196, 0.08893545449999962, [[null, 41, 0.08893545449999962, 0.13209303949999196]]], ["benchmarks.Scoring.time_rubin", "graphs/branch-HEAD/build/machine-github-linux/python-3.12/benchmarks.Scoring.time_rubin.json", {}, null, 0.5625298829999892, 0.37639383449999997, [[null, 41, 0.37639383449999997, 0.5625298829999892]]]]}
+{"regressions": []}
